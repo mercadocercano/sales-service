@@ -1,0 +1,59 @@
+2026/02/19 18:07:35 🚀 Order Service - HITO 3.0 Bootstrap - Iniciando...
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+2026/02/19 18:07:35 PROMETHEUS_ENABLED value: ''
+2026/02/19 18:07:35 Prometheus metrics disabled for Order service
+2026/02/19 18:07:35 Intentando conectar a order_db: postgres://postgres:postgres@localhost:5432/order_db?sslmode=disable
+2026/02/19 18:07:35 ✅ Conexión a order_db establecida con éxito
+2026/02/19 18:07:35 Intentando conectar a payment_method_db: postgres://postgres:postgres@localhost:5432/payment_method_db?sslmode=disable
+2026/02/19 18:07:35 ✅ Conexión a payment_method_db establecida con éxito
+2026/02/19 18:07:35 Intentando conectar a eventbus: postgres://postgres:postgres@localhost:5432/eventbus?sslmode=disable
+2026/02/19 18:07:35 ✅ Conexión a eventbus establecida con éxito
+[GIN-debug] GET    /health                   --> order/src/api/config.SetupAPIModule.func1 (5 handlers)
+[GIN-debug] GET    /api/v1/info              --> order/src/api/config.SetupAPIModule.func2 (5 handlers)
+[GIN-debug] GET    /api-docs                 --> order/src/api/config.SetupAPIModule.func3 (5 handlers)
+2026/02/19 18:07:35 Configurando módulo Order...
+2026/02/19 18:07:35 🔄 Loading global payment methods into cache...
+2026/02/19 18:07:35 ✅ Loaded 8 payment methods into cache
+2026/02/19 18:07:35    - b0000000-0000-0000-0000-000000000008: Cheque (check)
+2026/02/19 18:07:35    - b0000000-0000-0000-0000-000000000001: Efectivo (cash)
+2026/02/19 18:07:35    - b0000000-0000-0000-0000-000000000002: Tarjeta de Débito (debit_card)
+2026/02/19 18:07:35    - b0000000-0000-0000-0000-000000000003: Tarjeta de Crédito (credit_card)
+2026/02/19 18:07:35    - b0000000-0000-0000-0000-000000000004: Transferencia Bancaria (transfer)
+2026/02/19 18:07:35    - b0000000-0000-0000-0000-000000000005: Mercado Pago (mercadopago)
+2026/02/19 18:07:35    - b0000000-0000-0000-0000-000000000006: Criptomonedas (crypto)
+2026/02/19 18:07:35    - b0000000-0000-0000-0000-000000000007: Cuenta Corriente (on_account)
+[GIN-debug] GET    /api/v1/orders            --> order/src/order/infrastructure/controller.(*OrderController).ListOrders-fm (5 handlers)
+[GIN-debug] GET    /api/v1/orders/:order_id  --> order/src/order/infrastructure/controller.(*OrderController).GetOrder-fm (5 handlers)
+[GIN-debug] POST   /api/v1/orders            --> order/src/order/infrastructure/controller.(*OrderController).CreateOrder-fm (5 handlers)
+[GIN-debug] POST   /api/v1/orders/:order_id/confirm --> order/src/order/infrastructure/controller.(*OrderController).ConfirmOrder-fm (5 handlers)
+[GIN-debug] POST   /api/v1/orders/:order_id/cancel --> order/src/order/infrastructure/controller.(*OrderController).CancelOrder-fm (5 handlers)
+[GIN-debug] POST   /api/v1/orders/validate-stock --> order/src/order/infrastructure/controller.(*OrderController).ValidateStock-fm (5 handlers)
+[GIN-debug] POST   /api/v1/orders/reserve-stock --> order/src/order/infrastructure/controller.(*OrderController).ReserveStock-fm (5 handlers)
+[GIN-debug] POST   /api/v1/orders/release-stock --> order/src/order/infrastructure/controller.(*OrderController).ReleaseStock-fm (5 handlers)
+[GIN-debug] POST   /api/v1/pos/sale          --> order/src/order/infrastructure/controller.(*OrderController).POSSale-fm (5 handlers)
+[GIN-debug] GET    /api/v1/pos/sales         --> order/src/order/infrastructure/controller.(*OrderController).ListPosSales-fm (5 handlers)
+2026/02/19 18:07:35 Rutas Order disponibles:
+2026/02/19 18:07:35   GET    /api/v1/orders
+2026/02/19 18:07:35   GET    /api/v1/orders/:order_id
+2026/02/19 18:07:35   POST   /api/v1/orders
+2026/02/19 18:07:35   POST   /api/v1/orders/:order_id/confirm
+2026/02/19 18:07:35   POST   /api/v1/orders/:order_id/cancel
+2026/02/19 18:07:35   POST   /api/v1/orders/validate-stock
+2026/02/19 18:07:35   POST   /api/v1/orders/reserve-stock
+2026/02/19 18:07:35   POST   /api/v1/orders/release-stock
+2026/02/19 18:07:35   POST   /api/v1/pos/sale  ⭐ (POS Direct Sale)
+2026/02/19 18:07:35   GET    /api/v1/pos/sales  (POS Sales Report)
+[GIN-debug] GET    /api/v1/reports/daily     --> order/src/order/infrastructure/controller.(*ReportController).DailyReport-fm (5 handlers)
+2026/02/19 18:07:35 Rutas Report disponibles:
+2026/02/19 18:07:35   GET    /api/v1/reports/daily?date=YYYY-MM-DD
+2026/02/19 18:07:35 Módulo Order configurado exitosamente
+2026/02/19 18:07:35 ✅ Servidor Order Service iniciado en http://localhost:8122
+2026/02/19 18:07:35 ✅ Health endpoint: GET http://localhost:8122/health
+2026/02/19 18:07:35 ✅ Health endpoint: GET http://localhost:8122/api/v1/health
+[GIN-debug] [WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.
+Please check https://pkg.go.dev/github.com/gin-gonic/gin#readme-don-t-trust-all-proxies for details.
+[GIN-debug] Listening and serving HTTP on :8122
+[GIN-debug] [ERROR] listen tcp :8122: bind: address already in use
