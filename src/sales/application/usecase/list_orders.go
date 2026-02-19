@@ -3,8 +3,8 @@ package usecase
 import (
 	"context"
 	"math"
-	"order/src/order/application/response"
-	"order/src/order/domain/port"
+	"sales/src/sales/application/response"
+	"sales/src/sales/domain/port"
 )
 
 // ListOrdersUseCase caso de uso para listar órdenes con paginación

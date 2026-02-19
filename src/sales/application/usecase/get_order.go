@@ -2,9 +2,9 @@ package usecase
 
 import (
 	"context"
-	"order/src/order/application/response"
-	"order/src/order/domain/entity"
-	"order/src/order/domain/port"
+	"sales/src/sales/application/response"
+	"sales/src/sales/domain/entity"
+	"sales/src/sales/domain/port"
 )
 
 // GetOrderUseCase caso de uso para obtener una orden por ID

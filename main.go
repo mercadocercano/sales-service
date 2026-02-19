@@ -5,18 +5,20 @@ import (
 	"log"
 	"os"
 
-	apiConfig "order/src/api/config"
-	orderUseCase "order/src/order/application/usecase"
-	"order/src/order/domain/port"
-	orderCache "order/src/order/infrastructure/cache"
-	orderClient "order/src/order/infrastructure/client"
-	orderController "order/src/order/infrastructure/controller"
-	orderPersistence "order/src/order/infrastructure/persistence"
-	sharedConfig "order/src/shared/infrastructure/config"
+	apiConfig "sales/src/api/config"
+	salesUseCase "sales/src/sales/application/usecase"
+	"sales/src/sales/domain/port"
+	salesCache "sales/src/sales/infrastructure/cache"
+	salesClient "sales/src/sales/infrastructure/client"
+	salesController "sales/src/sales/infrastructure/controller"
+	salesPersistence "sales/src/sales/infrastructure/persistence"
+	sharedConfig "sales/src/shared/infrastructure/config"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq" // Driver de PostgreSQL
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	
+	"github.com/mercadocercano/eventbus"
 )
 
 // getEnv obtiene una variable de entorno o devuelve un valor por defecto
@@ -29,7 +31,7 @@ func getEnv(key, defaultValue string) string {
 }
 
 func main() {
-	log.Println("🚀 Order Service - HITO 3.0 Bootstrap - Iniciando...")
+	log.Println("🚀 Sales Service - HITO v0.2 - Iniciando...")
 
 	// Configurar el router con Gin
 	router := gin.New()
@@ -43,11 +45,11 @@ func main() {
 	log.Printf("PROMETHEUS_ENABLED value: '%s'", prometheusEnabled)
 
 	if prometheusEnabled == "true" {
-		log.Println("Registering /metrics endpoint for Order service")
+		log.Println("Registering /metrics endpoint for Sales service")
 		router.GET("/metrics", gin.WrapH(promhttp.Handler()))
-		log.Println("/metrics endpoint registered successfully for Order service")
+		log.Println("/metrics endpoint registered successfully for Sales service")
 	} else {
-		log.Println("Prometheus metrics disabled for Order service")
+		log.Println("Prometheus metrics disabled for Sales service")
 	}
 
 	// Configurar GZIP y otros middlewares compartidos
@@ -107,6 +109,44 @@ func main() {
 		}
 	}
 
+	// HITO v0.1: Conectar a EventBus DB
+	eventBusHost := getEnv("EVENTBUS_DB_HOST", dbHost)
+	eventBusPort := getEnv("EVENTBUS_DB_PORT", "5432")
+	eventBusUser := getEnv("EVENTBUS_DB_USER", dbUser)
+	eventBusPassword := getEnv("EVENTBUS_DB_PASSWORD", dbPassword)
+	eventBusName := getEnv("EVENTBUS_DB_NAME", "eventbus")
+	
+	eventBusConnStr := "postgres://" + eventBusUser + ":" + eventBusPassword + "@" + eventBusHost + ":" + eventBusPort + "/" + eventBusName + "?sslmode=disable"
+	log.Printf("Intentando conectar a eventbus: %s", eventBusConnStr)
+	
+	var eventBusDB *sql.DB
+	var publishUseCase *eventbus.PublishEventUseCase
+	
+	eventBusDB, err = sql.Open("postgres", eventBusConnStr)
+	if err != nil {
+		log.Printf("⚠️  Advertencia: Error al conectar a eventbus: %v", err)
+		log.Println("⚠️  Continuando sin publicación de eventos")
+		publishUseCase = nil
+	} else {
+		err = eventBusDB.Ping()
+		if err != nil {
+			log.Printf("⚠️  Advertencia: Error al verificar conexión a eventbus: %v", err)
+			log.Println("⚠️  Continuando sin publicación de eventos")
+			publishUseCase = nil
+		} else {
+			log.Println("✅ Conexión a eventbus establecida con éxito")
+			
+			// Inicializar eventbus publisher
+			logger := eventbus.NewLogger(eventbus.LevelInfo)
+			eventStore := eventbus.NewSQLEventStore(eventBusDB, logger)
+			publishUseCase = eventbus.NewPublishEventUseCase(eventStore, logger)
+			
+			if eventBusDB != nil {
+				defer eventBusDB.Close()
+			}
+		}
+	}
+
 	// API v1 grupo de rutas
 	v1 := router.Group("/api/v1")
 
@@ -116,31 +156,31 @@ func main() {
 	apiCfg.Version = "1.0.0-bootstrap"
 	apiConfig.SetupAPIModule(router, v1, apiCfg)
 
-	// Configurar módulo Order
-	setupOrderModule(v1, db, paymentMethodDB)
+	// Configurar módulo Sales (con eventbus)
+	setupSalesModule(v1, db, paymentMethodDB, publishUseCase)
 
 	// Iniciar el servidor
 	port := getEnv("PORT", "8080")
-	log.Printf("✅ Servidor Order Service iniciado en http://localhost:%s", port)
+	log.Printf("✅ Servidor Sales Service iniciado en http://localhost:%s", port)
 	log.Printf("✅ Health endpoint: GET http://localhost:%s/health", port)
 	log.Printf("✅ Health endpoint: GET http://localhost:%s/api/v1/health", port)
 	router.Run(":" + port)
 }
 
-// setupOrderModule configura el módulo Order
-func setupOrderModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.DB) {
-	log.Println("Configurando módulo Order...")
+// setupSalesModule configura el módulo Sales
+func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.DB, publishUseCase *eventbus.PublishEventUseCase) {
+	log.Println("Configurando módulo Sales...")
 
 	// Crear cliente de stock-service
-	stockClient := orderClient.NewStockClient()
+	stockClient := salesClient.NewStockClient()
 
 	// Crear cliente de pim-service (para snapshots)
-	pimClient := orderClient.NewPIMClient()
+	pimClient := salesClient.NewPIMClient()
 
 	// HITO: Inicializar cache de payment methods
-	var pmCache *orderCache.PaymentMethodCache
+	var pmCache *salesCache.PaymentMethodCache
 	if paymentMethodDB != nil {
-		pmCache = orderCache.NewPaymentMethodCache()
+		pmCache = salesCache.NewPaymentMethodCache()
 		err := pmCache.LoadFromDB(paymentMethodDB)
 		if err != nil {
 			log.Printf("⚠️  Warning: Could not load payment methods cache: %v", err)
@@ -151,52 +191,52 @@ func setupOrderModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 	}
 
 	// Crear repositorios
-	var orderRepo *orderPersistence.OrderPostgresRepository
+	var salesRepo *salesPersistence.OrderPostgresRepository
 	var posSaleRepo port.PosSaleRepository
 	if db != nil {
-		orderRepo = orderPersistence.NewOrderPostgresRepository(db)
-		posSaleRepo = orderPersistence.NewPosSalePostgresRepository(db)
+		salesRepo = salesPersistence.NewOrderPostgresRepository(db)
+		posSaleRepo = salesPersistence.NewPosSalePostgresRepository(db)
 	}
 
 	// Crear casos de uso
-	validateStockUC := orderUseCase.NewValidateStockUseCase(stockClient)
-	reserveStockUC := orderUseCase.NewReserveStockUseCase(stockClient)
-	releaseStockUC := orderUseCase.NewReleaseStockUseCase(stockClient)
+	validateStockUC := salesUseCase.NewValidateStockUseCase(stockClient)
+	reserveStockUC := salesUseCase.NewReserveStockUseCase(stockClient)
+	releaseStockUC := salesUseCase.NewReleaseStockUseCase(stockClient)
 	
-	// POS Sale UseCase - ahora con repo y cache de payment methods
-	var posSaleUC *orderUseCase.POSSaleUseCase
-	var listPosSalesUC *orderUseCase.ListPosSalesUseCase
+	// POS Sale UseCase - ahora con repo, cache y eventbus
+	var posSaleUC *salesUseCase.POSSaleUseCase
+	var listPosSalesUC *salesUseCase.ListPosSalesUseCase
 	if posSaleRepo != nil {
-		posSaleUC = orderUseCase.NewPOSSaleUseCase(stockClient, posSaleRepo, pmCache)
-		listPosSalesUC = orderUseCase.NewListPosSalesUseCase(posSaleRepo)
+		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockClient, posSaleRepo, pmCache, publishUseCase)
+		listPosSalesUC = salesUseCase.NewListPosSalesUseCase(posSaleRepo)
 	} else {
 		// Fallback sin repo (solo para desarrollo sin DB)
-		posSaleUC = orderUseCase.NewPOSSaleUseCase(stockClient, nil, pmCache)
+		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockClient, nil, pmCache, publishUseCase)
 	}
 
-	var createOrderUC *orderUseCase.CreateOrderUseCase
-	var confirmOrderUC *orderUseCase.ConfirmOrderUseCase
-	var cancelOrderUC *orderUseCase.CancelOrderUseCase
-	var listOrdersUC *orderUseCase.ListOrdersUseCase
-	var getOrderUC *orderUseCase.GetOrderUseCase
-	if orderRepo != nil {
-		createOrderUC = orderUseCase.NewCreateOrderUseCase(orderRepo, pimClient, stockClient)
-		confirmOrderUC = orderUseCase.NewConfirmOrderUseCase(orderRepo, stockClient)
-		cancelOrderUC = orderUseCase.NewCancelOrderUseCase(orderRepo, stockClient)
-		listOrdersUC = orderUseCase.NewListOrdersUseCase(orderRepo)
-		getOrderUC = orderUseCase.NewGetOrderUseCase(orderRepo)
+	var createOrderUC *salesUseCase.CreateOrderUseCase
+	var confirmOrderUC *salesUseCase.ConfirmOrderUseCase
+	var cancelOrderUC *salesUseCase.CancelOrderUseCase
+	var listOrdersUC *salesUseCase.ListOrdersUseCase
+	var getOrderUC *salesUseCase.GetOrderUseCase
+	if salesRepo != nil {
+		createOrderUC = salesUseCase.NewCreateOrderUseCase(salesRepo, pimClient, stockClient)
+		confirmOrderUC = salesUseCase.NewConfirmOrderUseCase(salesRepo, stockClient, publishUseCase)
+		cancelOrderUC = salesUseCase.NewCancelOrderUseCase(salesRepo, stockClient)
+		listOrdersUC = salesUseCase.NewListOrdersUseCase(salesRepo)
+		getOrderUC = salesUseCase.NewGetOrderUseCase(salesRepo)
 	}
 
 	// Crear controladores
-	orderCtrl := orderController.NewOrderController(validateStockUC, reserveStockUC, releaseStockUC, createOrderUC, confirmOrderUC, cancelOrderUC, listOrdersUC, getOrderUC, posSaleUC, listPosSalesUC)
+	salesCtrl := salesController.NewOrderController(validateStockUC, reserveStockUC, releaseStockUC, createOrderUC, confirmOrderUC, cancelOrderUC, listOrdersUC, getOrderUC, posSaleUC, listPosSalesUC)
 
 	// HITO C - Report Controller
-	dailyReportUC := orderUseCase.NewDailyReportUseCase(db)
-	reportCtrl := orderController.NewReportController(dailyReportUC)
+	dailyReportUC := salesUseCase.NewDailyReportUseCase(db)
+	reportCtrl := salesController.NewReportController(dailyReportUC)
 
 	// Registrar rutas
-	orderCtrl.RegisterRoutes(router)
+	salesCtrl.RegisterRoutes(router)
 	reportCtrl.RegisterRoutes(router)
 
-	log.Println("Módulo Order configurado exitosamente")
+	log.Println("Módulo Sales configurado exitosamente")
 }

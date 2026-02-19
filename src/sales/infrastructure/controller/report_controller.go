@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"order/src/order/application/usecase"
+	"sales/src/sales/application/usecase"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

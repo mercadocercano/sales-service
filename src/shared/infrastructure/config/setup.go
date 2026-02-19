@@ -1,7 +1,7 @@
 package config
 
 import (
-	"order/src/shared/infrastructure/middleware"
+	"sales/src/shared/infrastructure/middleware"
 
 	"github.com/gin-gonic/gin"
 )

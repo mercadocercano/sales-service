@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"order/src/order/domain/entity"
-	"order/src/order/domain/port"
+	"sales/src/sales/domain/entity"
+	"sales/src/sales/domain/port"
 
 	"github.com/google/uuid"
 )

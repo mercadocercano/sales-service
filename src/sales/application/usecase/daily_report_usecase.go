@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"order/src/order/application/response"
+	"sales/src/sales/application/response"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"

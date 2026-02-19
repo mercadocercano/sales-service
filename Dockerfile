@@ -28,7 +28,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags='-w -s -extldflags "-static"' \
     -a -installsuffix cgo \
     -trimpath \
-    -o order-service .
+    -o sales-service .
 
 # ==============================================
 # Stage 3: Development stage (with hot reload)
@@ -81,23 +81,23 @@ CMD ["go", "run", "."]
 FROM gcr.io/distroless/static-debian12:nonroot AS production
 
 # Metadata
-LABEL org.opencontainers.image.title="Order Service" \
-      org.opencontainers.image.description="Order Management Service for SaaS MT" \
-      org.opencontainers.image.source="https://github.com/saas-mt/order-service" \
+LABEL org.opencontainers.image.title="Sales Service" \
+      org.opencontainers.image.description="Sales Management Service for SaaS MT" \
+      org.opencontainers.image.source="https://github.com/saas-mt/sales-service" \
       org.opencontainers.image.vendor="SaaS MT Team" \
       org.opencontainers.image.licenses="MIT"
 
 WORKDIR /app
 
 # Copy binary only
-COPY --from=builder --chown=nonroot:nonroot /app/order-service ./
+COPY --from=builder --chown=nonroot:nonroot /app/sales-service ./
 
 # Use distroless nonroot user (uid=65532)
 USER nonroot
 
 EXPOSE 8080
 
-ENTRYPOINT ["./order-service"]
+ENTRYPOINT ["./sales-service"]
 
 # ==============================================
 # Default stage: Development

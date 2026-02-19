@@ -3,7 +3,7 @@ package criteria
 import (
 	"net/url"
 
-	domainCriteria "order/src/shared/domain/criteria"
+	domainCriteria "sales/src/shared/domain/criteria"
 
 	"github.com/gin-gonic/gin"
 )

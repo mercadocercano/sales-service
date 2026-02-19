@@ -2,7 +2,7 @@ package port
 
 import (
 	"context"
-	"order/src/order/domain/entity"
+	"sales/src/sales/domain/entity"
 
 	"github.com/google/uuid"
 )

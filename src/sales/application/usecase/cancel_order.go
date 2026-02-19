@@ -3,9 +3,9 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"order/src/order/domain/entity"
-	"order/src/order/domain/port"
-	"order/src/order/infrastructure/client"
+	"sales/src/sales/domain/entity"
+	"sales/src/sales/domain/port"
+	"sales/src/sales/infrastructure/client"
 )
 
 // CancelOrderUseCase caso de uso para cancelar una orden

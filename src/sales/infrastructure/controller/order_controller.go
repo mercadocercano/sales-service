@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"order/src/order/application/request"
-	"order/src/order/application/usecase"
-	"order/src/order/domain/entity"
+	"sales/src/sales/application/request"
+	"sales/src/sales/application/usecase"
+	"sales/src/sales/domain/entity"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	domainCriteria "order/src/shared/domain/criteria"
+	domainCriteria "sales/src/shared/domain/criteria"
 )
 
 // SQLCriteriaConverter convierte un objeto Criteria en una consulta SQL

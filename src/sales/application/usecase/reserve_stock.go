@@ -2,9 +2,9 @@ package usecase
 
 import (
 	"fmt"
-	"order/src/order/application/request"
-	"order/src/order/application/response"
-	"order/src/order/infrastructure/client"
+	"sales/src/sales/application/request"
+	"sales/src/sales/application/response"
+	"sales/src/sales/infrastructure/client"
 
 	"github.com/google/uuid"
 )

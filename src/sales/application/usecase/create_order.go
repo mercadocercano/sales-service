@@ -3,11 +3,11 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"order/src/order/application/request"
-	"order/src/order/application/response"
-	"order/src/order/domain/entity"
-	"order/src/order/domain/port"
-	"order/src/order/infrastructure/client"
+	"sales/src/sales/application/request"
+	"sales/src/sales/application/response"
+	"sales/src/sales/domain/entity"
+	"sales/src/sales/domain/port"
+	"sales/src/sales/infrastructure/client"
 )
 
 // CreateOrderUseCase caso de uso para crear una orden

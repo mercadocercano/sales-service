@@ -2,28 +2,31 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
-	"order/src/order/application/request"
-	"order/src/order/application/response"
-	"order/src/order/domain/entity"
-	"order/src/order/domain/port"
-	"order/src/order/infrastructure/cache"
-	"order/src/order/infrastructure/client"
+	"sales/src/sales/application/request"
+	"sales/src/sales/application/response"
+	"sales/src/sales/domain/entity"
+	"sales/src/sales/domain/port"
+	"sales/src/sales/infrastructure/cache"
+	"sales/src/sales/infrastructure/client"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
+	"github.com/mercadocercano/eventbus"
 )
 
 // POSSaleUseCase caso de uso para venta directa POS
 // Hito: POS-SALE-02.BE - Paso 3
 // HITO: POST /pos/sale devuelve DTO listo para imprimir
 type POSSaleUseCase struct {
-	stockClient      *client.StockClient
-	posSaleRepo      port.PosSaleRepository
+	stockClient        *client.StockClient
+	posSaleRepo        port.PosSaleRepository
 	paymentMethodCache *cache.PaymentMethodCache
+	publishUseCase     *eventbus.PublishEventUseCase
 }
 
 // NewPOSSaleUseCase crea una nueva instancia del caso de uso
@@ -31,11 +34,13 @@ func NewPOSSaleUseCase(
 	stockClient *client.StockClient,
 	posSaleRepo port.PosSaleRepository,
 	paymentMethodCache *cache.PaymentMethodCache,
+	publishUseCase *eventbus.PublishEventUseCase,
 ) *POSSaleUseCase {
 	return &POSSaleUseCase{
 		stockClient:        stockClient,
 		posSaleRepo:        posSaleRepo,
 		paymentMethodCache: paymentMethodCache,
+		publishUseCase:     publishUseCase,
 	}
 }
 
@@ -191,6 +196,15 @@ func (uc *POSSaleUseCase) Execute(tenantID, authToken string, req *request.POSSa
 		}
 
 		log.Printf("✅ PosSale created: ID=%s, Items=%d, FinalAmount=%s", posSale.ID, posSale.TotalItems(), posSale.FinalAmount)
+		
+		// HITO v0.1: Publicar evento sales.pos.confirmed
+		if uc.publishUseCase != nil {
+			ctx := context.Background()
+			if err := uc.publishPOSSaleConfirmedEvent(ctx, posSale, tenantID); err != nil {
+				// Log error pero NO fallar la operación (venta ya registrada)
+				log.Printf("WARNING: Failed to publish sales.pos.confirmed: %v", err)
+			}
+		}
 	} else {
 		uc.compensateProcessedStock(tenantID, authToken, processedStockEntries, "repository_not_available")
 		return nil, fmt.Errorf("pos_sale repository not available")
@@ -237,6 +251,52 @@ func (uc *POSSaleUseCase) Execute(tenantID, authToken string, req *request.POSSa
 		CustomerID:        posSale.CustomerID,
 		CreatedAt:         posSale.CreatedAt,
 	}, nil
+}
+
+// publishPOSSaleConfirmedEvent publica el evento sales.pos.confirmed
+func (uc *POSSaleUseCase) publishPOSSaleConfirmedEvent(
+	ctx context.Context,
+	posSale *entity.PosSale,
+	tenantID string,
+) error {
+	// Construir payload según contrato v1 (SOLO el payload, sin envelope)
+	payload := map[string]interface{}{
+		"pos_number": 0, // TODO: Implementar numeración secuencial
+		"customer": map[string]interface{}{
+			"customer_id":   "00000000-0000-0000-0000-000000000001", // TODO: Obtener customer_id real
+			"customer_name": "Cliente Genérico",
+			"tax_condition": "CONSUMIDOR_FINAL",
+		},
+		"currency":      posSale.Currency,
+		"exchange_rate": 1.0,
+		"totals": map[string]interface{}{
+			"subtotal": posSale.TotalAmount.InexactFloat64(),
+			"discount": posSale.DiscountAmount.InexactFloat64(),
+			"tax":      0.0,
+			"total":    posSale.FinalAmount.InexactFloat64(),
+		},
+		"payment": map[string]interface{}{
+			"method":          posSale.PaymentMethodID.String(),
+			"amount_received": posSale.AmountPaid.InexactFloat64(),
+			"change_given":    posSale.Change.InexactFloat64(),
+		},
+	}
+
+	// Serializar payload a JSON
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	// Publicar usando eventbus (el envelope lo construye PublishEventUseCase)
+	return uc.publishUseCase.Execute(
+		ctx,
+		posSale.ID.String(),      // aggregateID
+		"pos_sale",               // aggregateType
+		"sales.pos.confirmed",    // eventType
+		payloadBytes,             // payload (solo datos de negocio)
+		"order-service",          // publishedBy
+	)
 }
 
 // compensateProcessedStock revierte todas las ventas procesadas

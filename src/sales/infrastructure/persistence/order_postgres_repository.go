@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"order/src/order/domain/entity"
+	"sales/src/sales/domain/entity"
 )
 
 // OrderPostgresRepository implementa OrderRepository usando PostgreSQL
