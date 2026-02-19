@@ -35,16 +35,17 @@ func (uc *ListOrdersUseCase) Execute(ctx context.Context, tenantID string, page,
 		return nil, err
 	}
 
-	// Convertir a respuesta
+	// Convertir a respuesta con snapshots
 	var items []response.OrderListItem
 	for _, order := range orders {
 		var orderItems []response.OrderItemResponse
 		for _, item := range order.Items {
 			orderItems = append(orderItems, response.OrderItemResponse{
-				ItemID:   item.ItemID,
-				OrderID:  item.OrderID,
-				SKU:      item.SKU,
-				Quantity: item.Quantity,
+				ItemID:          item.ItemID,
+				SKU:             item.SKU,
+				Quantity:        item.Quantity,
+				ProductSnapshot: item.ProductSnapshot,
+				VariantSnapshot: item.VariantSnapshot,
 			})
 		}
 

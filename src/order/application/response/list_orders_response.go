@@ -1,13 +1,5 @@
 package response
 
-// OrderItemResponse representa un item en el listado
-type OrderItemResponse struct {
-	ItemID   string `json:"item_id"`
-	OrderID  string `json:"order_id"`
-	SKU      string `json:"sku"`
-	Quantity int    `json:"quantity"`
-}
-
 // OrderListItem representa una orden en el listado
 type OrderListItem struct {
 	OrderID   string              `json:"order_id"`

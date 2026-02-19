@@ -50,7 +50,7 @@ func (uc *ReserveStockUseCase) Execute(tenantID, authToken string, req *request.
 			Quantity:  stockResp.ReservedQty,
 			Reference: stockResp.Reference,
 		}
-		
+
 		itemsResponse = append(itemsResponse, itemResp)
 		reservedItems = append(reservedItems, itemResp)
 	}

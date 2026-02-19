@@ -9,6 +9,7 @@ import (
 	"order/src/order/domain/entity"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // OrderController maneja las peticiones HTTP para orders
@@ -21,6 +22,8 @@ type OrderController struct {
 	cancelOrderUC   *usecase.CancelOrderUseCase
 	listOrdersUC    *usecase.ListOrdersUseCase
 	getOrderUC      *usecase.GetOrderUseCase
+	posSaleUC       *usecase.POSSaleUseCase
+	listPosSalesUC  *usecase.ListPosSalesUseCase
 }
 
 // NewOrderController crea una nueva instancia del controlador
@@ -33,6 +36,8 @@ func NewOrderController(
 	cancelOrderUC *usecase.CancelOrderUseCase,
 	listOrdersUC *usecase.ListOrdersUseCase,
 	getOrderUC *usecase.GetOrderUseCase,
+	posSaleUC *usecase.POSSaleUseCase,
+	listPosSalesUC *usecase.ListPosSalesUseCase,
 ) *OrderController {
 	return &OrderController{
 		validateStockUC: validateStockUC,
@@ -43,6 +48,8 @@ func NewOrderController(
 		cancelOrderUC:   cancelOrderUC,
 		listOrdersUC:    listOrdersUC,
 		getOrderUC:      getOrderUC,
+		posSaleUC:       posSaleUC,
+		listPosSalesUC:  listPosSalesUC,
 	}
 }
 
@@ -59,6 +66,14 @@ func (c *OrderController) RegisterRoutes(router *gin.RouterGroup) {
 		orders.POST("/reserve-stock", c.ReserveStock)
 		orders.POST("/release-stock", c.ReleaseStock)
 	}
+
+	// Grupo POS para ventas directas
+	pos := router.Group("/pos")
+	{
+		pos.POST("/sale", c.POSSale)
+		pos.GET("/sales", c.ListPosSales)
+	}
+
 	log.Println("Rutas Order disponibles:")
 	log.Println("  GET    /api/v1/orders")
 	log.Println("  GET    /api/v1/orders/:order_id")
@@ -68,6 +83,42 @@ func (c *OrderController) RegisterRoutes(router *gin.RouterGroup) {
 	log.Println("  POST   /api/v1/orders/validate-stock")
 	log.Println("  POST   /api/v1/orders/reserve-stock")
 	log.Println("  POST   /api/v1/orders/release-stock")
+	log.Println("  POST   /api/v1/pos/sale  ⭐ (POS Direct Sale)")
+	log.Println("  GET    /api/v1/pos/sales  (POS Sales Report)")
+}
+
+// ListPosSales lista las ventas POS del tenant (para reporte)
+func (c *OrderController) ListPosSales(ctx *gin.Context) {
+	if c.listPosSalesUC == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "POS sales list not available (database not configured)",
+		})
+		return
+	}
+
+	tenantID := ctx.GetHeader("X-Tenant-ID")
+	if tenantID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "X-Tenant-ID header is required"})
+		return
+	}
+
+	tenantUUID, err := uuid.Parse(tenantID)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid X-Tenant-ID format"})
+		return
+	}
+
+	items, err := c.listPosSalesUC.Execute(ctx.Request.Context(), tenantUUID)
+	if err != nil {
+		log.Printf("Error listing POS sales: %v", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"items":       items,
+		"total_count": len(items),
+	})
 }
 
 // CancelOrder maneja la cancelación de una orden confirmada
@@ -235,7 +286,10 @@ func (c *OrderController) CreateOrder(ctx *gin.Context) {
 		return
 	}
 
-	// 2. Validar body
+	// 2. Obtener Authorization header
+	authToken := ctx.GetHeader("Authorization")
+
+	// 3. Validar body
 	var req request.CreateOrderRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
@@ -245,8 +299,8 @@ func (c *OrderController) CreateOrder(ctx *gin.Context) {
 		return
 	}
 
-	// 3. Ejecutar use case
-	resp, err := c.createOrderUC.Execute(ctx.Request.Context(), tenantID, &req)
+	// 4. Ejecutar use case con snapshots de PIM
+	resp, err := c.createOrderUC.Execute(ctx.Request.Context(), tenantID, authToken, &req)
 	if err != nil {
 		log.Printf("Error creating order: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{
@@ -337,7 +391,7 @@ func (c *OrderController) ReserveStock(ctx *gin.Context) {
 	resp, err := c.reserveStockUC.Execute(tenantID, authToken, &req)
 	if err != nil {
 		log.Printf("Error reserving stock: %v", err)
-		
+
 		// Si es error de stock insuficiente → 409
 		if contains(err.Error(), "insufficient_stock") {
 			ctx.JSON(http.StatusConflict, gin.H{
@@ -345,7 +399,7 @@ func (c *OrderController) ReserveStock(ctx *gin.Context) {
 			})
 			return
 		}
-		
+
 		// Otros errores → 502
 		ctx.JSON(http.StatusBadGateway, gin.H{
 			"error":   "Error communicating with stock service",
@@ -484,6 +538,55 @@ func parsePageParam(s string) (int, error) {
 	return n, nil
 }
 
+// POSSale maneja venta directa POS sin crear orden
+func (c *OrderController) POSSale(ctx *gin.Context) {
+	// 1. Validar header X-Tenant-ID (OBLIGATORIO)
+	tenantID := ctx.GetHeader("X-Tenant-ID")
+	if tenantID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error": "X-Tenant-ID header is required",
+		})
+		return
+	}
+
+	// 2. Obtener Authorization header
+	authToken := ctx.GetHeader("Authorization")
+
+	// 3. Validar body
+	var req request.POSSaleRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid request body",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// 4. Ejecutar use case
+	resp, err := c.posSaleUC.Execute(tenantID, authToken, &req)
+	if err != nil {
+		log.Printf("Error processing POS sale: %v", err)
+
+		// Si es error de stock insuficiente → 409
+		if contains(err.Error(), "insufficient_stock") {
+			ctx.JSON(http.StatusConflict, gin.H{
+				"error": "Insufficient stock for POS sale",
+			})
+			return
+		}
+
+		// Otros errores → 502
+		ctx.JSON(http.StatusBadGateway, gin.H{
+			"error":   "Error processing POS sale",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// 5. Responder exitosamente
+	ctx.JSON(http.StatusCreated, resp)
+}
+
 // ValidateStock maneja la validación de stock para items de orden
 func (c *OrderController) ValidateStock(ctx *gin.Context) {
 	// 1. Validar header X-Tenant-ID (OBLIGATORIO)
@@ -502,7 +605,7 @@ func (c *OrderController) ValidateStock(ctx *gin.Context) {
 	var req request.ValidateStockRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request body",
+			"error":   "Invalid request body",
 			"details": err.Error(),
 		})
 		return
@@ -521,7 +624,7 @@ func (c *OrderController) ValidateStock(ctx *gin.Context) {
 	if err != nil {
 		log.Printf("Error validating stock: %v", err)
 		ctx.JSON(http.StatusBadGateway, gin.H{
-			"error": "Error communicating with stock service",
+			"error":   "Error communicating with stock service",
 			"details": err.Error(),
 		})
 		return

@@ -23,7 +23,7 @@ type Order struct {
 	Status    OrderStatus `json:"status"`
 	CreatedAt time.Time   `json:"created_at"`
 	Items     []OrderItem `json:"items"` // DDD: Collection of entities
-	
+
 	// Campos legacy (deprecated, usar Items)
 	SKU      string `json:"sku,omitempty"`
 	Quantity int    `json:"quantity,omitempty"`

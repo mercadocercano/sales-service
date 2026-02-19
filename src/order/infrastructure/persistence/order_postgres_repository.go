@@ -49,12 +49,12 @@ func (r *OrderPostgresRepository) Save(ctx context.Context, order *entity.Order)
 		return fmt.Errorf("error saving order: %w", err)
 	}
 
-	// 2. Insertar items (entities dentro del aggregate)
+	// 2. Insertar items (entities dentro del aggregate) con snapshots
 	queryItem := `
 		INSERT INTO order_items (
-			item_id, order_id, sku, quantity, created_at
+			item_id, order_id, sku, quantity, product_snapshot, variant_snapshot, created_at
 		) VALUES (
-			$1, $2, $3, $4, $5
+			$1, $2, $3, $4, $5, $6, $7
 		)
 	`
 
@@ -64,6 +64,8 @@ func (r *OrderPostgresRepository) Save(ctx context.Context, order *entity.Order)
 			order.OrderID,
 			item.SKU,
 			item.Quantity,
+			item.ProductSnapshot,
+			item.VariantSnapshot,
 			order.CreatedAt,
 		)
 
@@ -104,9 +106,9 @@ func (r *OrderPostgresRepository) FindByID(ctx context.Context, orderID, tenantI
 		return nil, fmt.Errorf("error finding order: %w", err)
 	}
 
-	// 2. Cargar items (entities dentro del aggregate)
+	// 2. Cargar items (entities dentro del aggregate) con snapshots
 	queryItems := `
-		SELECT item_id, order_id, sku, quantity
+		SELECT item_id, order_id, sku, quantity, product_snapshot, variant_snapshot
 		FROM order_items
 		WHERE order_id = $1
 		ORDER BY created_at
@@ -126,6 +128,8 @@ func (r *OrderPostgresRepository) FindByID(ctx context.Context, orderID, tenantI
 			&item.OrderID,
 			&item.SKU,
 			&item.Quantity,
+			&item.ProductSnapshot,
+			&item.VariantSnapshot,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("error scanning order item: %w", err)
@@ -225,9 +229,9 @@ func (r *OrderPostgresRepository) List(ctx context.Context, tenantID string, pag
 			return nil, 0, fmt.Errorf("error scanning order: %w", err)
 		}
 
-		// 4. Cargar items de cada orden
+		// 4. Cargar items de cada orden con snapshots
 		queryItems := `
-			SELECT item_id, order_id, sku, quantity
+			SELECT item_id, order_id, sku, quantity, product_snapshot, variant_snapshot
 			FROM order_items
 			WHERE order_id = $1
 			ORDER BY created_at
@@ -246,6 +250,8 @@ func (r *OrderPostgresRepository) List(ctx context.Context, tenantID string, pag
 				&item.OrderID,
 				&item.SKU,
 				&item.Quantity,
+				&item.ProductSnapshot,
+				&item.VariantSnapshot,
 			)
 			if err != nil {
 				itemRows.Close()
