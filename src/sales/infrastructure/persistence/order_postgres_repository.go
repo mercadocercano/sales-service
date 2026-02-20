@@ -31,18 +31,22 @@ func (r *OrderPostgresRepository) Save(ctx context.Context, order *entity.Order)
 
 	// 1. Insertar orden (aggregate root)
 	queryOrder := `
-		INSERT INTO orders (
-			order_id, tenant_id, status, created_at
+		INSERT INTO sales_orders (
+			id, tenant_id, customer_id, status, total_amount, created_at, updated_at, version
 		) VALUES (
-			$1, $2, $3, $4
+			$1, $2, $3, $4, $5, $6, $7, $8
 		)
 	`
 
 	_, err = tx.ExecContext(ctx, queryOrder,
 		order.OrderID,
 		order.TenantID,
+		"00000000-0000-0000-0000-000000000001", // customer_id temporal
 		order.Status,
+		0.00, // total_amount (calculado después)
 		order.CreatedAt,
+		order.CreatedAt, // updated_at
+		1, // version
 	)
 
 	if err != nil {
@@ -51,8 +55,8 @@ func (r *OrderPostgresRepository) Save(ctx context.Context, order *entity.Order)
 
 	// 2. Insertar items (entities dentro del aggregate) con snapshots
 	queryItem := `
-		INSERT INTO order_items (
-			item_id, order_id, sku, quantity, product_snapshot, variant_snapshot, created_at
+		INSERT INTO sales_order_items (
+			id, sales_order_id, sku, quantity, product_snapshot, variant_snapshot, created_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7
 		)
@@ -86,9 +90,9 @@ func (r *OrderPostgresRepository) Save(ctx context.Context, order *entity.Order)
 func (r *OrderPostgresRepository) FindByID(ctx context.Context, orderID, tenantID string) (*entity.Order, error) {
 	// 1. Buscar orden (aggregate root)
 	queryOrder := `
-		SELECT order_id, tenant_id, status, created_at
-		FROM orders
-		WHERE order_id = $1 AND tenant_id = $2
+		SELECT id, tenant_id, status, created_at
+		FROM sales_orders
+		WHERE id = $1 AND tenant_id = $2
 	`
 
 	order := &entity.Order{}
@@ -108,9 +112,9 @@ func (r *OrderPostgresRepository) FindByID(ctx context.Context, orderID, tenantI
 
 	// 2. Cargar items (entities dentro del aggregate) con snapshots
 	queryItems := `
-		SELECT item_id, order_id, sku, quantity, product_snapshot, variant_snapshot
-		FROM order_items
-		WHERE order_id = $1
+		SELECT id, id, sku, quantity, product_snapshot, variant_snapshot
+		FROM sales_order_items
+		WHERE id = $1
 		ORDER BY created_at
 	`
 
@@ -145,9 +149,9 @@ func (r *OrderPostgresRepository) FindByID(ctx context.Context, orderID, tenantI
 // Confirm actualiza el estado de una orden a CONFIRMED
 func (r *OrderPostgresRepository) Confirm(ctx context.Context, orderID, tenantID string) error {
 	query := `
-		UPDATE orders
+		UPDATE sales_orders
 		SET status = 'CONFIRMED'
-		WHERE order_id = $1 AND tenant_id = $2 AND status = 'CREATED'
+		WHERE id = $1 AND tenant_id = $2 AND status = 'CREATED'
 	`
 
 	result, err := r.db.ExecContext(ctx, query, orderID, tenantID)
@@ -166,9 +170,9 @@ func (r *OrderPostgresRepository) Confirm(ctx context.Context, orderID, tenantID
 // Cancel actualiza el estado de una orden a CANCELED
 func (r *OrderPostgresRepository) Cancel(ctx context.Context, orderID, tenantID string) error {
 	query := `
-		UPDATE orders
+		UPDATE sales_orders
 		SET status = 'CANCELED'
-		WHERE order_id = $1 AND tenant_id = $2 AND status = 'CONFIRMED'
+		WHERE id = $1 AND tenant_id = $2 AND status = 'CONFIRMED'
 	`
 
 	result, err := r.db.ExecContext(ctx, query, orderID, tenantID)
@@ -190,7 +194,7 @@ func (r *OrderPostgresRepository) List(ctx context.Context, tenantID string, pag
 	var totalCount int
 	queryCount := `
 		SELECT COUNT(*)
-		FROM orders
+		FROM sales_orders
 		WHERE tenant_id = $1
 	`
 	err := r.db.QueryRowContext(ctx, queryCount, tenantID).Scan(&totalCount)
@@ -203,8 +207,8 @@ func (r *OrderPostgresRepository) List(ctx context.Context, tenantID string, pag
 
 	// 3. Obtener órdenes paginadas
 	queryOrders := `
-		SELECT order_id, tenant_id, status, created_at
-		FROM orders
+		SELECT id, tenant_id, status, created_at
+		FROM sales_orders
 		WHERE tenant_id = $1
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
@@ -231,9 +235,9 @@ func (r *OrderPostgresRepository) List(ctx context.Context, tenantID string, pag
 
 		// 4. Cargar items de cada orden con snapshots
 		queryItems := `
-			SELECT item_id, order_id, sku, quantity, product_snapshot, variant_snapshot
-			FROM order_items
-			WHERE order_id = $1
+			SELECT id, sales_order_id, sku, quantity, product_snapshot, variant_snapshot
+			FROM sales_order_items
+			WHERE id = $1
 			ORDER BY created_at
 		`
 
