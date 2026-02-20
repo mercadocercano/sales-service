@@ -6,6 +6,7 @@ import (
 	"os"
 
 	apiConfig "sales/src/api/config"
+	salesService "sales/src/sales/application/service"
 	salesUseCase "sales/src/sales/application/usecase"
 	"sales/src/sales/domain/port"
 	salesCache "sales/src/sales/infrastructure/cache"
@@ -171,6 +172,13 @@ func main() {
 func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.DB, publishUseCase *eventbus.PublishEventUseCase) {
 	log.Println("Configurando módulo Sales...")
 
+	// HITO v0.4: Crear servicio de secuencias
+	var sequenceService *salesService.SequenceService
+	if db != nil {
+		sequenceService = salesService.NewSequenceService(db)
+		log.Println("✅ Sequence service inicializado")
+	}
+
 	// Crear cliente de stock-service
 	stockClient := salesClient.NewStockClient()
 
@@ -221,7 +229,7 @@ func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 	var getOrderUC *salesUseCase.GetOrderUseCase
 	if salesRepo != nil {
 		createOrderUC = salesUseCase.NewCreateOrderUseCase(salesRepo, pimClient, stockClient)
-		confirmOrderUC = salesUseCase.NewConfirmOrderUseCase(salesRepo, stockClient, publishUseCase)
+		confirmOrderUC = salesUseCase.NewConfirmOrderUseCase(salesRepo, stockClient, publishUseCase, sequenceService)
 		cancelOrderUC = salesUseCase.NewCancelOrderUseCase(salesRepo, stockClient)
 		listOrdersUC = salesUseCase.NewListOrdersUseCase(salesRepo)
 		getOrderUC = salesUseCase.NewGetOrderUseCase(salesRepo)

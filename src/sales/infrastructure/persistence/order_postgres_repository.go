@@ -146,11 +146,11 @@ func (r *OrderPostgresRepository) FindByID(ctx context.Context, orderID, tenantI
 	return order, nil
 }
 
-// Confirm actualiza el estado de una orden a CONFIRMED
+// Confirm actualiza el estado de una orden a CONFIRMED y asigna order_number
 func (r *OrderPostgresRepository) Confirm(ctx context.Context, orderID, tenantID string) error {
 	query := `
 		UPDATE sales_orders
-		SET status = 'CONFIRMED'
+		SET status = 'CONFIRMED', updated_at = NOW()
 		WHERE id = $1 AND tenant_id = $2 AND status = 'CREATED'
 	`
 
@@ -162,6 +162,22 @@ func (r *OrderPostgresRepository) Confirm(ctx context.Context, orderID, tenantID
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
 		return fmt.Errorf("order not found or not in CREATED state")
+	}
+
+	return nil
+}
+
+// UpdateOrderNumber actualiza el número de orden (HITO v0.4)
+func (r *OrderPostgresRepository) UpdateOrderNumber(ctx context.Context, orderID, tenantID string, orderNumber int) error {
+	query := `
+		UPDATE sales_orders
+		SET order_number = $1, updated_at = NOW()
+		WHERE id = $2 AND tenant_id = $3
+	`
+
+	_, err := r.db.ExecContext(ctx, query, orderNumber, orderID, tenantID)
+	if err != nil {
+		return fmt.Errorf("error updating order number: %w", err)
 	}
 
 	return nil

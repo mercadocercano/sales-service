@@ -18,11 +18,12 @@ const (
 // Order representa una orden (Aggregate Root)
 // Una orden contiene uno o más OrderItems
 type Order struct {
-	OrderID   string      `json:"order_id"`
-	TenantID  string      `json:"tenant_id"`
-	Status    OrderStatus `json:"status"`
-	CreatedAt time.Time   `json:"created_at"`
-	Items     []OrderItem `json:"items"` // DDD: Collection of entities
+	OrderID     string      `json:"order_id"`
+	TenantID    string      `json:"tenant_id"`
+	OrderNumber *int        `json:"order_number,omitempty"` // HITO v0.4: Numeración secuencial
+	Status      OrderStatus `json:"status"`
+	CreatedAt   time.Time   `json:"created_at"`
+	Items       []OrderItem `json:"items"` // DDD: Collection of entities
 
 	// Campos legacy (deprecated, usar Items)
 	SKU      string `json:"sku,omitempty"`
@@ -106,4 +107,9 @@ func (o *Order) Cancel() error {
 	}
 	o.Status = OrderStatusCanceled
 	return nil
+}
+
+// AssignOrderNumber asigna el número de orden (HITO v0.4)
+func (o *Order) AssignOrderNumber(number int) {
+	o.OrderNumber = &number
 }

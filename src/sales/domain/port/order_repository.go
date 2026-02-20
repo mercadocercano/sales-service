@@ -12,4 +12,5 @@ type OrderRepository interface {
 	List(ctx context.Context, tenantID string, page, pageSize int) ([]*entity.Order, int, error)
 	Confirm(ctx context.Context, orderID, tenantID string) error
 	Cancel(ctx context.Context, orderID, tenantID string) error
+	UpdateOrderNumber(ctx context.Context, orderID, tenantID string, orderNumber int) error
 }

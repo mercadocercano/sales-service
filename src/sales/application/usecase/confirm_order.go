@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"time"
+	"sales/src/sales/application/service"
 	"sales/src/sales/domain/entity"
 	"sales/src/sales/domain/port"
 	"sales/src/sales/infrastructure/client"
@@ -15,9 +16,10 @@ import (
 
 // ConfirmOrderUseCase caso de uso para confirmar una orden
 type ConfirmOrderUseCase struct {
-	orderRepo      port.OrderRepository
-	stockClient    *client.StockClient
-	publishUseCase *eventbus.PublishEventUseCase
+	orderRepo       port.OrderRepository
+	stockClient     *client.StockClient
+	publishUseCase  *eventbus.PublishEventUseCase
+	sequenceService *service.SequenceService
 }
 
 // NewConfirmOrderUseCase crea una nueva instancia del caso de uso
@@ -25,11 +27,13 @@ func NewConfirmOrderUseCase(
 	orderRepo port.OrderRepository, 
 	stockClient *client.StockClient,
 	publishUseCase *eventbus.PublishEventUseCase,
+	sequenceService *service.SequenceService,
 ) *ConfirmOrderUseCase {
 	return &ConfirmOrderUseCase{
-		orderRepo:      orderRepo,
-		stockClient:    stockClient,
-		publishUseCase: publishUseCase,
+		orderRepo:       orderRepo,
+		stockClient:     stockClient,
+		publishUseCase:  publishUseCase,
+		sequenceService: sequenceService,
 	}
 }
 
@@ -59,15 +63,32 @@ func (uc *ConfirmOrderUseCase) Execute(ctx context.Context, tenantID, authToken,
 		}
 	}
 
-	// 4. Confirmar orden en DB
+	// 4. HITO v0.4: Asignar número de orden (con optimistic locking)
+	if uc.sequenceService != nil {
+		orderNumber, err := uc.sequenceService.NextNumber(ctx, tenantID, "SALES_ORDER")
+		if err != nil {
+			return nil, fmt.Errorf("error assigning order number: %w", err)
+		}
+		order.AssignOrderNumber(orderNumber)
+		log.Printf("✅ Order number assigned: %d", orderNumber)
+	}
+
+	// 5. Confirmar orden en DB
 	if err := uc.orderRepo.Confirm(ctx, orderID, tenantID); err != nil {
 		return nil, fmt.Errorf("error confirming order: %w", err)
 	}
 
-	// 5. Actualizar entidad en memoria
+	// 5b. HITO v0.4: Persistir order_number si fue asignado
+	if order.OrderNumber != nil {
+		if err := uc.orderRepo.UpdateOrderNumber(ctx, orderID, tenantID, *order.OrderNumber); err != nil {
+			log.Printf("WARNING: Failed to persist order_number: %v", err)
+		}
+	}
+
+	// 6. Actualizar entidad en memoria
 	order.Status = entity.OrderStatusConfirmed
 
-	// 6. HITO v0.1: Publicar evento sales.order.confirmed
+	// 7. HITO v0.1: Publicar evento sales.order.confirmed
 	if uc.publishUseCase != nil {
 		if err := uc.publishSalesOrderConfirmedEvent(ctx, order, tenantID); err != nil {
 			// Log error pero NO fallar la operación (orden ya confirmada)
