@@ -50,7 +50,7 @@ echo ""
 
 # Test 1: Crear orden con snapshots
 echo -e "${YELLOW}[1/4] Creando orden con snapshot...${NC}"
-CREATE_RESPONSE=$(curl -s -X POST "$KONG_URL/order/api/v1/orders" \
+CREATE_RESPONSE=$(curl -s -X POST "$KONG_URL/sales/api/v1/orders" \
   -H "Content-Type: application/json" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Authorization: Bearer $AUTH_TOKEN" \
@@ -71,7 +71,7 @@ echo ""
 
 # Test 2: Obtener orden y verificar snapshots
 echo -e "${YELLOW}[2/4] Obteniendo orden y verificando snapshots...${NC}"
-GET_RESPONSE=$(curl -s "$KONG_URL/order/api/v1/orders/$ORDER_ID" \
+GET_RESPONSE=$(curl -s "$KONG_URL/sales/api/v1/orders/$ORDER_ID" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Authorization: Bearer $AUTH_TOKEN")
 
@@ -97,7 +97,7 @@ echo ""
 # Test 3: Verificar inmutabilidad (consultar de nuevo)
 echo -e "${YELLOW}[3/4] Verificando inmutabilidad de snapshots...${NC}"
 sleep 1
-GET_RESPONSE_2=$(curl -s "$KONG_URL/order/api/v1/orders/$ORDER_ID" \
+GET_RESPONSE_2=$(curl -s "$KONG_URL/sales/api/v1/orders/$ORDER_ID" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Authorization: Bearer $AUTH_TOKEN")
 
@@ -111,7 +111,7 @@ echo ""
 
 # Test 4: Listar órdenes y verificar snapshots
 echo -e "${YELLOW}[4/4] Listando órdenes y verificando snapshots...${NC}"
-LIST_RESPONSE=$(curl -s "$KONG_URL/order/api/v1/orders?page=1&page_size=10" \
+LIST_RESPONSE=$(curl -s "$KONG_URL/sales/api/v1/orders?page=1&page_size=10" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Authorization: Bearer $AUTH_TOKEN")
 

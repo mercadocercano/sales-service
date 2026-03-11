@@ -56,7 +56,7 @@ EOF
 echo ""
 
 echo "Sending request..."
-RESPONSE=$(curl -s -X POST "$KONG_URL/order/api/v1/pos/sale" \
+RESPONSE=$(curl -s -X POST "$KONG_URL/sales/api/v1/pos" \
   -H "Content-Type: application/json" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Authorization: $AUTH_TOKEN" \
@@ -113,7 +113,7 @@ cat <<EOF > /tmp/pos_sale_request2.json
 }
 EOF
 
-RESPONSE2=$(curl -s -X POST "$KONG_URL/order/api/v1/pos/sale" \
+RESPONSE2=$(curl -s -X POST "$KONG_URL/sales/api/v1/pos" \
   -H "Content-Type: application/json" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Authorization: $AUTH_TOKEN" \
@@ -158,7 +158,7 @@ cat <<EOF > /tmp/pos_sale_request3.json
 }
 EOF
 
-RESPONSE3=$(curl -s -X POST "$KONG_URL/order/api/v1/pos/sale" \
+RESPONSE3=$(curl -s -X POST "$KONG_URL/sales/api/v1/pos" \
   -H "Content-Type: application/json" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Authorization: $AUTH_TOKEN" \
@@ -201,7 +201,7 @@ cat <<EOF > /tmp/pos_sale_request4.json
 }
 EOF
 
-RESPONSE4=$(curl -s -X POST "$KONG_URL/order/api/v1/pos/sale" \
+RESPONSE4=$(curl -s -X POST "$KONG_URL/sales/api/v1/pos" \
   -H "Content-Type: application/json" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "Authorization: $AUTH_TOKEN" \

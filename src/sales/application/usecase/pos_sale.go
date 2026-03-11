@@ -13,34 +13,45 @@ import (
 	"sales/src/sales/domain/port"
 	"sales/src/sales/infrastructure/cache"
 	"sales/src/sales/infrastructure/client"
+	"sales/src/sales/infrastructure/metrics"
 
 	"github.com/google/uuid"
-	"github.com/shopspring/decimal"
 	"github.com/mercadocercano/eventbus"
+	"github.com/shopspring/decimal"
 )
 
 // POSSaleUseCase caso de uso para venta directa POS
 // Hito: POS-SALE-02.BE - Paso 3
-// HITO: POST /pos/sale devuelve DTO listo para imprimir
+// HITO v0.6: Ahora valida customer_id contra customer-service
+// H8: TenantClient + tenant_metrics para TTFS (evita duplicado si se borran ventas)
 type POSSaleUseCase struct {
-	stockClient        *client.StockClient
-	posSaleRepo        port.PosSaleRepository
-	paymentMethodCache *cache.PaymentMethodCache
-	publishUseCase     *eventbus.PublishEventUseCase
+	stockClient         *client.StockClient
+	posSaleRepo         port.PosSaleRepository
+	tenantMetricsRepo   port.TenantMetricsRepository
+	paymentMethodCache  *cache.PaymentMethodCache
+	publishUseCase      *eventbus.PublishEventUseCase
+	customerClient      *client.CustomerClient
+	tenantClient        *client.TenantClient
 }
 
 // NewPOSSaleUseCase crea una nueva instancia del caso de uso
 func NewPOSSaleUseCase(
 	stockClient *client.StockClient,
 	posSaleRepo port.PosSaleRepository,
+	tenantMetricsRepo port.TenantMetricsRepository,
 	paymentMethodCache *cache.PaymentMethodCache,
 	publishUseCase *eventbus.PublishEventUseCase,
+	customerClient *client.CustomerClient,
+	tenantClient *client.TenantClient,
 ) *POSSaleUseCase {
 	return &POSSaleUseCase{
 		stockClient:        stockClient,
 		posSaleRepo:        posSaleRepo,
+		tenantMetricsRepo:  tenantMetricsRepo,
 		paymentMethodCache: paymentMethodCache,
 		publishUseCase:     publishUseCase,
+		customerClient:     customerClient,
+		tenantClient:       tenantClient,
 	}
 }
 
@@ -86,6 +97,20 @@ func (uc *POSSaleUseCase) Execute(tenantID, authToken string, req *request.POSSa
 	tenantUUID, err := uuid.Parse(tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid tenant_id format: %w", err)
+	}
+
+	// ========================================================================
+	// HITO v0.6: PASO 1.5 - Validar customer_id contra customer-service
+	// ========================================================================
+	ctx := context.Background()
+	exists, err := uc.customerClient.Exists(ctx, tenantUUID, req.CustomerID)
+	if err != nil {
+		// Error técnico comunicándose con customer-service
+		return nil, fmt.Errorf("error validating customer: %w", err)
+	}
+	if !exists {
+		// Cliente no existe (404) - Error de dominio
+		return nil, fmt.Errorf("customer_not_found: %s", req.CustomerID.String())
 	}
 
 	// ========================================================================
@@ -196,6 +221,11 @@ func (uc *POSSaleUseCase) Execute(tenantID, authToken string, req *request.POSSa
 		}
 
 		log.Printf("✅ PosSale created: ID=%s, Items=%d, FinalAmount=%s", posSale.ID, posSale.TotalItems(), posSale.FinalAmount)
+
+		// H8 TTFS: tenant_metrics evita duplicado si se borran ventas
+		uc.recordTTFSIfFirstSale(ctx, tenantUUID, posSale.CreatedAt)
+		// H8 DAT: primera venta del día por tenant
+		uc.recordDATIfFirstSaleOfDay(ctx, tenantUUID)
 		
 		// HITO v0.1: Publicar evento sales.pos.confirmed
 		if uc.publishUseCase != nil {
@@ -297,6 +327,39 @@ func (uc *POSSaleUseCase) publishPOSSaleConfirmedEvent(
 		payloadBytes,             // payload (solo datos de negocio)
 		"order-service",          // publishedBy
 	)
+}
+
+// recordTTFSIfFirstSale registra ttfs_seconds solo cuando es la primera venta real del tenant
+// Usa tenant_metrics (INSERT ON CONFLICT DO NOTHING) para evitar duplicado si se borran ventas
+func (uc *POSSaleUseCase) recordTTFSIfFirstSale(ctx context.Context, tenantID uuid.UUID, firstSaleAt time.Time) {
+	if uc.tenantClient == nil || uc.tenantMetricsRepo == nil {
+		return
+	}
+	inserted, err := uc.tenantMetricsRepo.RecordFirstSaleIfNew(ctx, tenantID, firstSaleAt)
+	if err != nil || !inserted {
+		return
+	}
+	tenant, err := uc.tenantClient.GetTenant(ctx, tenantID)
+	if err != nil {
+		log.Printf("WARNING: TTFS metric skipped (tenant fetch failed): %v", err)
+		return
+	}
+	ttfs := firstSaleAt.Sub(tenant.CreatedAt).Seconds()
+	metrics.TTFS.WithLabelValues(tenantID.String()).Observe(ttfs)
+	log.Printf("📊 H8 TTFS: tenant=%s ttfs=%.0fs", tenantID.String(), ttfs)
+}
+
+// recordDATIfFirstSaleOfDay incrementa daily_active_tenants_total si es la primera venta del día
+func (uc *POSSaleUseCase) recordDATIfFirstSaleOfDay(ctx context.Context, tenantID uuid.UUID) {
+	if uc.posSaleRepo == nil {
+		return
+	}
+	count, err := uc.posSaleRepo.CountSalesTodayByTenant(ctx, tenantID)
+	if err != nil || count != 1 {
+		return
+	}
+	metrics.DailyActiveTenantsTotal.Inc()
+	log.Printf("📊 H8 DAT: tenant=%s first sale of day", tenantID.String())
 }
 
 // compensateProcessedStock revierte todas las ventas procesadas

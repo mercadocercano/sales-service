@@ -21,7 +21,7 @@ echo "  Quantity: $QUANTITY"
 echo ""
 
 echo "🔹 Ejecutando venta POS..."
-RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "$ORDER_SERVICE_URL/api/v1/pos/sale" \
+RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "$ORDER_SERVICE_URL/api/v1/sales/pos" \
   -H "Content-Type: application/json" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -d "{

@@ -1,5 +1,8 @@
 # ==============================================
-# Order Service - Multi-stage Dockerfile
+# Sales Service - Multi-stage Dockerfile
+# ==============================================
+# Build desde raíz del monorepo (eventbus en libs/):
+#   docker build -f services/sales-service/Dockerfile .
 # ==============================================
 
 # ==============================================
@@ -11,8 +14,9 @@ WORKDIR /app
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata
 
-# Copy dependency files and download modules
-COPY go.mod go.sum ./
+# Copy sales-service + libs/eventbus (replace en go.mod)
+COPY services/sales-service/go.mod services/sales-service/go.sum ./
+COPY libs/eventbus /libs/eventbus
 RUN go mod download && go mod verify
 
 # ==============================================
@@ -21,7 +25,7 @@ RUN go mod download && go mod verify
 FROM deps AS builder
 
 # Copy source code
-COPY . .
+COPY services/sales-service/ .
 
 # Build optimized binary with security hardening
 RUN CGO_ENABLED=0 GOOS=linux go build \
@@ -76,7 +80,17 @@ EXPOSE 8080
 CMD ["go", "run", "."]
 
 # ==============================================
-# Stage 4: Production stage (Distroless)
+# Stage 4: Migrate stage (Alpine + psql para Job K8s)
+# ==============================================
+FROM alpine:3.18 AS migrate
+
+RUN apk add --no-cache postgresql-client
+
+WORKDIR /app
+COPY --from=builder /app/migrations ./migrations
+
+# ==============================================
+# Stage 5: Production stage (Distroless)
 # ==============================================
 FROM gcr.io/distroless/static-debian12:nonroot AS production
 

@@ -9,7 +9,8 @@ import (
 type OrderRepository interface {
 	Save(ctx context.Context, order *entity.Order) error
 	FindByID(ctx context.Context, orderID, tenantID string) (*entity.Order, error)
-	List(ctx context.Context, tenantID string, page, pageSize int) ([]*entity.Order, int, error)
+	List(ctx context.Context, tenantID string, page, pageSize int, statusFilter string) ([]*entity.Order, int, error)
+	GetOrderFinancialSummary(ctx context.Context, orderID, tenantID string) (*entity.OrderFinancialSummary, error)
 	Confirm(ctx context.Context, orderID, tenantID string) error
 	Cancel(ctx context.Context, orderID, tenantID string) error
 	UpdateOrderNumber(ctx context.Context, orderID, tenantID string, orderNumber int) error

@@ -8,10 +8,12 @@ import (
 	apiConfig "sales/src/api/config"
 	salesService "sales/src/sales/application/service"
 	salesUseCase "sales/src/sales/application/usecase"
+	salesReports "sales/src/sales/application/usecase/reports"
 	"sales/src/sales/domain/port"
 	salesCache "sales/src/sales/infrastructure/cache"
 	salesClient "sales/src/sales/infrastructure/client"
 	salesController "sales/src/sales/infrastructure/controller"
+	_ "sales/src/sales/infrastructure/metrics" // H8: Registra pos_sales_*, pos_sale_latency_ms, ttfs_seconds
 	salesPersistence "sales/src/sales/infrastructure/persistence"
 	sharedConfig "sales/src/shared/infrastructure/config"
 
@@ -32,7 +34,7 @@ func getEnv(key, defaultValue string) string {
 }
 
 func main() {
-	log.Println("🚀 Sales Service - HITO v0.2 - Iniciando...")
+	log.Println("🚀 Sales Service - HITO v0.5 - HTTP Routes Alignment - Iniciando...")
 
 	// Configurar el router con Gin
 	router := gin.New()
@@ -154,7 +156,7 @@ func main() {
 	// Configurar el módulo API (health check y documentación)
 	apiCfg := apiConfig.DefaultAPIConfig()
 	apiCfg.DB = db
-	apiCfg.Version = "1.0.0-bootstrap"
+	apiCfg.Version = "0.5.0-routes-alignment"
 	apiConfig.SetupAPIModule(router, v1, apiCfg)
 
 	// Configurar módulo Sales (con eventbus)
@@ -185,6 +187,12 @@ func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 	// Crear cliente de pim-service (para snapshots)
 	pimClient := salesClient.NewPIMClient()
 
+	// HITO v0.6: Crear cliente de customer-service
+	// H8: Crear cliente de tenant (IAM) para TTFS
+	kongBaseURL := getEnv("KONG_URL", getEnv("KONG_INTERNAL_URL", "http://localhost:8001"))
+	customerClient := salesClient.NewCustomerClient(kongBaseURL)
+	tenantClient := salesClient.NewTenantClient(kongBaseURL)
+
 	// HITO: Inicializar cache de payment methods
 	var pmCache *salesCache.PaymentMethodCache
 	if paymentMethodDB != nil {
@@ -201,9 +209,13 @@ func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 	// Crear repositorios
 	var salesRepo *salesPersistence.OrderPostgresRepository
 	var posSaleRepo port.PosSaleRepository
+	var tenantMetricsRepo port.TenantMetricsRepository
+	var reportRepo port.ReportRepository
 	if db != nil {
 		salesRepo = salesPersistence.NewOrderPostgresRepository(db)
 		posSaleRepo = salesPersistence.NewPosSalePostgresRepository(db)
+		tenantMetricsRepo = salesPersistence.NewTenantMetricsPostgresRepository(db)
+		reportRepo = salesPersistence.NewReportPostgresRepository(db)
 	}
 
 	// Crear casos de uso
@@ -211,15 +223,14 @@ func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 	reserveStockUC := salesUseCase.NewReserveStockUseCase(stockClient)
 	releaseStockUC := salesUseCase.NewReleaseStockUseCase(stockClient)
 	
-	// POS Sale UseCase - ahora con repo, cache y eventbus
+	// POS Sale UseCase - repo, tenant_metrics (TTFS), cache, eventbus, customer, tenant
 	var posSaleUC *salesUseCase.POSSaleUseCase
 	var listPosSalesUC *salesUseCase.ListPosSalesUseCase
 	if posSaleRepo != nil {
-		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockClient, posSaleRepo, pmCache, publishUseCase)
+		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockClient, posSaleRepo, tenantMetricsRepo, pmCache, publishUseCase, customerClient, tenantClient)
 		listPosSalesUC = salesUseCase.NewListPosSalesUseCase(posSaleRepo)
 	} else {
-		// Fallback sin repo (solo para desarrollo sin DB)
-		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockClient, nil, pmCache, publishUseCase)
+		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockClient, nil, nil, pmCache, publishUseCase, customerClient, tenantClient)
 	}
 
 	var createOrderUC *salesUseCase.CreateOrderUseCase
@@ -227,24 +238,49 @@ func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 	var cancelOrderUC *salesUseCase.CancelOrderUseCase
 	var listOrdersUC *salesUseCase.ListOrdersUseCase
 	var getOrderUC *salesUseCase.GetOrderUseCase
+	var getOrderFinancialUC *salesUseCase.GetOrderFinancialUseCase
+	var registerPaymentUC *salesUseCase.RegisterPaymentUseCase
 	if salesRepo != nil {
-		createOrderUC = salesUseCase.NewCreateOrderUseCase(salesRepo, pimClient, stockClient)
+		// HITO v0.6: CreateOrderUseCase ahora valida customer_id
+		createOrderUC = salesUseCase.NewCreateOrderUseCase(salesRepo, pimClient, stockClient, customerClient)
 		confirmOrderUC = salesUseCase.NewConfirmOrderUseCase(salesRepo, stockClient, publishUseCase, sequenceService)
 		cancelOrderUC = salesUseCase.NewCancelOrderUseCase(salesRepo, stockClient)
 		listOrdersUC = salesUseCase.NewListOrdersUseCase(salesRepo)
 		getOrderUC = salesUseCase.NewGetOrderUseCase(salesRepo)
+		getOrderFinancialUC = salesUseCase.NewGetOrderFinancialUseCase(salesRepo)
+		// HITO Cobranza: RegisterPaymentUseCase
+		registerPaymentUC = salesUseCase.NewRegisterPaymentUseCase(db, publishUseCase)
+	}
+
+	var applyCustomerCreditUC *salesUseCase.ApplyCustomerCreditUseCase
+	var createCustomerCreditUC *salesUseCase.CreateCustomerCreditUseCase
+	if db != nil && publishUseCase != nil {
+		applyCustomerCreditUC = salesUseCase.NewApplyCustomerCreditUseCase(db, publishUseCase)
+		createCustomerCreditUC = salesUseCase.NewCreateCustomerCreditUseCase(db, publishUseCase)
 	}
 
 	// Crear controladores
-	salesCtrl := salesController.NewOrderController(validateStockUC, reserveStockUC, releaseStockUC, createOrderUC, confirmOrderUC, cancelOrderUC, listOrdersUC, getOrderUC, posSaleUC, listPosSalesUC)
+	salesCtrl := salesController.NewOrderController(validateStockUC, reserveStockUC, releaseStockUC, createOrderUC, confirmOrderUC, cancelOrderUC, listOrdersUC, getOrderUC, getOrderFinancialUC, posSaleUC, listPosSalesUC, registerPaymentUC, applyCustomerCreditUC)
 
-	// HITO C - Report Controller
+	// HITO C - Report Controller (daily + open-orders + aging + customer-balance)
 	dailyReportUC := salesUseCase.NewDailyReportUseCase(db)
-	reportCtrl := salesController.NewReportController(dailyReportUC)
+	var openOrdersReportUC *salesReports.GetOpenOrdersReportUseCase
+	var agingReportUC *salesReports.GetAgingReportUseCase
+	var customerBalanceUC *salesReports.GetCustomerBalanceUseCase
+	if reportRepo != nil {
+		openOrdersReportUC = salesReports.NewGetOpenOrdersReportUseCase(reportRepo)
+		agingReportUC = salesReports.NewGetAgingReportUseCase(reportRepo)
+		customerBalanceUC = salesReports.NewGetCustomerBalanceUseCase(reportRepo)
+	}
+	reportCtrl := salesController.NewReportController(dailyReportUC, openOrdersReportUC, agingReportUC, customerBalanceUC)
 
 	// Registrar rutas
 	salesCtrl.RegisterRoutes(router)
+	customerCtrl := salesController.NewCustomerController(createCustomerCreditUC)
+	customerCtrl.RegisterRoutes(router)
 	reportCtrl.RegisterRoutes(router)
+	metricsCtrl := salesController.NewMetricsController()
+	metricsCtrl.RegisterRoutes(router)
 
 	log.Println("Módulo Sales configurado exitosamente")
 }

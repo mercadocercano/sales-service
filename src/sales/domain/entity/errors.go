@@ -4,6 +4,7 @@ import "errors"
 
 var (
 	ErrTenantIDRequired         = errors.New("tenant_id is required")
+	ErrCustomerIDRequired       = errors.New("customer_id is required") // HITO v0.6
 	ErrSKURequired              = errors.New("sku is required")
 	ErrInvalidQuantity          = errors.New("quantity must be greater than 0")
 	ErrOrderNotFound            = errors.New("order not found")

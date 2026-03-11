@@ -21,7 +21,7 @@ type POSSaleItemResponse struct {
 
 // POSSaleResponse respuesta de venta directa POS multi-item
 // HITO B - Refactorizado para multi-item + descuentos
-// HITO: POST /pos/sale devuelve DTO listo para imprimir
+// HITO v0.6: customer_id ahora es obligatorio (no nullable)
 type POSSaleResponse struct {
 	PosSaleID         uuid.UUID              `json:"pos_sale_id"`
 	SaleNumber        string                 `json:"sale_number"`       // UUID como número de venta
@@ -35,6 +35,6 @@ type POSSaleResponse struct {
 	AmountPaid        decimal.Decimal        `json:"amount_paid"`       // Monto pagado
 	Change            decimal.Decimal        `json:"change"`            // Vuelto
 	Currency          string                 `json:"currency"`
-	CustomerID        *uuid.UUID             `json:"customer_id,omitempty"`
+	CustomerID        uuid.UUID              `json:"customer_id"`       // HITO v0.6: Obligatorio
 	CreatedAt         time.Time              `json:"created_at"`
 }

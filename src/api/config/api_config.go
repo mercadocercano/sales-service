@@ -40,7 +40,7 @@ func SetupAPIModule(router *gin.Engine, apiGroup *gin.RouterGroup, config *APICo
 
 		c.JSON(http.StatusOK, gin.H{
 			"status":   status,
-			"service":  "stock",
+			"service":  "sales",
 			"version":  config.Version,
 			"database": dbStatus,
 		})
@@ -49,16 +49,16 @@ func SetupAPIModule(router *gin.Engine, apiGroup *gin.RouterGroup, config *APICo
 	// Información sobre la API
 	apiGroup.GET("/info", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"service":     "Stock Management Service",
+			"service":     "Sales Management Service",
 			"version":     config.Version,
-			"description": "Servicio para la gestión de ubicaciones, almacenes y stock",
+			"description": "Servicio para la gestión de órdenes y ventas POS",
 		})
 	})
 
 	// Documentación de la API (si está disponible)
 	router.GET("/api-docs", func(c *gin.Context) {
 		c.HTML(http.StatusOK, "swagger.html", gin.H{
-			"title": "Stock API Documentation",
+			"title": "Sales API Documentation",
 		})
 	})
 }

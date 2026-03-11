@@ -9,9 +9,10 @@ import (
 
 // PosSaleListItem representa un item de la lista de ventas POS
 // HITO B - Actualizado para multi-item
+// HITO v0.6: customer_id ahora es obligatorio (no nullable)
 type PosSaleListItem struct {
 	ID              uuid.UUID       `json:"id"`
-	CustomerID      *uuid.UUID      `json:"customer_id,omitempty"`
+	CustomerID      uuid.UUID       `json:"customer_id"`      // HITO v0.6: Obligatorio
 	PaymentMethodID uuid.UUID       `json:"payment_method_id"`
 	TotalAmount     decimal.Decimal `json:"total_amount"`     // Suma de subtotales
 	DiscountAmount  decimal.Decimal `json:"discount_amount"`  // Descuento aplicado

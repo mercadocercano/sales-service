@@ -3,31 +3,44 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"log"
 	"sales/src/sales/application/request"
 	"sales/src/sales/application/response"
 	"sales/src/sales/domain/entity"
 	"sales/src/sales/domain/port"
 	"sales/src/sales/infrastructure/client"
+
+	"github.com/google/uuid"
 )
 
 // CreateOrderUseCase caso de uso para crear una orden
+// HITO v0.6: Ahora valida customer_id contra customer-service
 type CreateOrderUseCase struct {
-	orderRepo   port.OrderRepository
-	pimClient   *client.PIMClient
-	stockClient *client.StockClient
+	orderRepo      port.OrderRepository
+	pimClient      *client.PIMClient
+	stockClient    *client.StockClient
+	customerClient *client.CustomerClient
 }
 
 // NewCreateOrderUseCase crea una nueva instancia del caso de uso
-func NewCreateOrderUseCase(orderRepo port.OrderRepository, pimClient *client.PIMClient, stockClient *client.StockClient) *CreateOrderUseCase {
+func NewCreateOrderUseCase(
+	orderRepo port.OrderRepository,
+	pimClient *client.PIMClient,
+	stockClient *client.StockClient,
+	customerClient *client.CustomerClient,
+) *CreateOrderUseCase {
 	return &CreateOrderUseCase{
-		orderRepo:   orderRepo,
-		pimClient:   pimClient,
-		stockClient: stockClient,
+		orderRepo:      orderRepo,
+		pimClient:      pimClient,
+		stockClient:    stockClient,
+		customerClient: customerClient,
 	}
 }
 
 // Execute ejecuta la creación de la orden con operación atómica y compensación
+// HITO v0.6: Ahora valida customer_id ANTES de procesar
 // HITO D - Flujo transaccional robusto:
+// 0. Validar customer_id contra customer-service (HITO v0.6)
 // 1. Obtener snapshots de PIM para todos los items
 // 2. Crear aggregate Order (en memoria)
 // 3. Ejecutar ProcessSaleAtomic para cada item (validación + descuento atómico)
@@ -40,28 +53,57 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID, authToken s
 	}
 
 	// ========================================================================
+	// HITO v0.6: PASO 0 - Validar customer_id contra customer-service
+	// ========================================================================
+	tenantUUID, err := uuid.Parse(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tenant_id: %w", err)
+	}
+
+	exists, err := uc.customerClient.Exists(ctx, tenantUUID, req.CustomerID)
+	if err != nil {
+		// Error técnico comunicándose con customer-service
+		return nil, fmt.Errorf("error validating customer: %w", err)
+	}
+	if !exists {
+		// Cliente no existe (404) - Error de dominio
+		return nil, fmt.Errorf("customer_not_found: %s", req.CustomerID.String())
+	}
+
+	// ========================================================================
 	// PASO 1: Obtener snapshots inmutables de PIM para todos los items
 	// ========================================================================
 	var items []entity.OrderItem
 	for _, itemReq := range req.Items {
-		// Obtener snapshots inmutables de PIM al momento de crear la orden
-		productSnapshot, variantSnapshot, err := uc.pimClient.GetSnapshotForSKU(tenantID, authToken, itemReq.SKU)
-		if err != nil {
-			return nil, fmt.Errorf("error fetching snapshot for SKU %s: %w", itemReq.SKU, err)
+		// Validar unit_price del request (fuente primaria)
+		if itemReq.UnitPrice <= 0 {
+			return nil, fmt.Errorf("invalid unit_price for SKU %s: must be > 0", itemReq.SKU)
 		}
 
-		// Crear item con snapshots
-		item, err := entity.NewOrderItemWithSnapshots("", itemReq.SKU, itemReq.Quantity, productSnapshot, variantSnapshot)
+		// Intentar obtener snapshots de PIM para trazabilidad (best effort)
+		productSnapshot, variantSnapshot, err := uc.pimClient.GetSnapshotForSKU(tenantID, authToken, itemReq.SKU)
 		if err != nil {
-			return nil, fmt.Errorf("error creating order item: %w", itemReq.SKU, err)
+			// PIM falló - loggear pero NO bloquear
+			// Sales es autosuficiente con el unit_price recibido
+			log.Printf("WARNING: PIM snapshot failed for SKU %s: %v. Using request unit_price.", itemReq.SKU, err)
+			productSnapshot = nil
+			variantSnapshot = nil
+		}
+
+		// Crear item con unit_price del request (fuente primaria)
+		// Snapshots son enriquecimiento opcional para trazabilidad
+		item, err := entity.NewOrderItemWithSnapshots("", itemReq.SKU, itemReq.Quantity, itemReq.UnitPrice, productSnapshot, variantSnapshot)
+		if err != nil {
+			return nil, fmt.Errorf("error creating order item for SKU %s: %w", itemReq.SKU, err)
 		}
 		items = append(items, *item)
 	}
 
 	// ========================================================================
 	// PASO 2: Crear entidad Order (aggregate root) EN MEMORIA - AÚN NO persiste
+	// HITO v0.6: Ahora incluye customer_id
 	// ========================================================================
-	order, err := entity.NewOrder(tenantID, items)
+	order, err := entity.NewOrder(tenantID, req.CustomerID.String(), items)
 	if err != nil {
 		return nil, fmt.Errorf("error creating order entity: %w", err)
 	}

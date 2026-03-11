@@ -9,11 +9,11 @@ import (
 
 // PosSale representa una venta POS (Aggregate Root)
 // HITO B - Refactorizado para soportar multi-item + descuentos
-// HITO: POST /pos/sale devuelve DTO listo para imprimir
+// HITO v0.6: customer_id ahora es OBLIGATORIO (validado contra customer-service)
 type PosSale struct {
 	ID              uuid.UUID       `json:"id"`
 	TenantID        uuid.UUID       `json:"tenant_id"`
-	CustomerID      *uuid.UUID      `json:"customer_id"`       // NULL = consumidor final
+	CustomerID      uuid.UUID       `json:"customer_id"`       // HITO v0.6: Obligatorio
 	PaymentMethodID uuid.UUID       `json:"payment_method_id"` // Obligatorio
 	TotalAmount     decimal.Decimal `json:"total_amount"`      // Suma de subtotales
 	DiscountAmount  decimal.Decimal `json:"discount_amount"`   // Descuento fijo
@@ -27,10 +27,10 @@ type PosSale struct {
 
 // NewPosSale crea una nueva venta POS con múltiples items (DDD Aggregate Root)
 // HITO B - Constructor multi-item
-// HITO: POST /pos/sale devuelve DTO listo para imprimir
+// HITO v0.6: customer_id ahora es OBLIGATORIO
 func NewPosSale(
 	tenantID uuid.UUID,
-	customerID *uuid.UUID,
+	customerID uuid.UUID, // HITO v0.6: Ya no nullable
 	paymentMethodID uuid.UUID,
 	items []PosSaleItem,
 	discountAmount decimal.Decimal,
@@ -40,6 +40,9 @@ func NewPosSale(
 	// Validaciones básicas
 	if tenantID == uuid.Nil {
 		return nil, ErrTenantIDRequired
+	}
+	if customerID == uuid.Nil {
+		return nil, ErrCustomerIDRequired // HITO v0.6
 	}
 	if paymentMethodID == uuid.Nil {
 		return nil, ErrTenantIDRequired // TODO: Crear ErrPaymentMethodRequired

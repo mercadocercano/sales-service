@@ -196,3 +196,29 @@ func (r *PosSalePostgresRepository) ListByTenant(ctx context.Context, tenantID u
 
 	return sales, nil
 }
+
+// CountByTenant cuenta las ventas POS de un tenant
+func (r *PosSalePostgresRepository) CountByTenant(ctx context.Context, tenantID uuid.UUID) (int, error) {
+	query := `SELECT COUNT(*) FROM pos_sales WHERE tenant_id = $1`
+	var count int
+	err := r.db.QueryRowContext(ctx, query, tenantID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("error counting pos_sales: %w", err)
+	}
+	return count, nil
+}
+
+// CountSalesTodayByTenant cuenta ventas del tenant en el día actual (UTC)
+// H8 DAT: Si count == 1 tras Create, es la primera venta del día
+func (r *PosSalePostgresRepository) CountSalesTodayByTenant(ctx context.Context, tenantID uuid.UUID) (int, error) {
+	query := `
+		SELECT COUNT(*) FROM pos_sales
+		WHERE tenant_id = $1 AND created_at >= CURRENT_DATE
+	`
+	var count int
+	err := r.db.QueryRowContext(ctx, query, tenantID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("error counting pos_sales today: %w", err)
+	}
+	return count, nil
+}

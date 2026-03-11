@@ -19,8 +19,8 @@ func NewListOrdersUseCase(orderRepo port.OrderRepository) *ListOrdersUseCase {
 	}
 }
 
-// Execute ejecuta el listado de órdenes
-func (uc *ListOrdersUseCase) Execute(ctx context.Context, tenantID string, page, pageSize int) (*response.ListOrdersResponse, error) {
+// Execute ejecuta el listado de órdenes. statusFilter opcional: CREATED | CONFIRMED | PAID | CANCELED | OPEN (CREATED+CONFIRMED, remaining > 0)
+func (uc *ListOrdersUseCase) Execute(ctx context.Context, tenantID string, page, pageSize int, statusFilter string) (*response.ListOrdersResponse, error) {
 	// Valores por defecto
 	if page < 1 {
 		page = 1
@@ -30,7 +30,7 @@ func (uc *ListOrdersUseCase) Execute(ctx context.Context, tenantID string, page,
 	}
 
 	// Obtener órdenes del repositorio
-	orders, totalCount, err := uc.orderRepo.List(ctx, tenantID, page, pageSize)
+	orders, totalCount, err := uc.orderRepo.List(ctx, tenantID, page, pageSize, statusFilter)
 	if err != nil {
 		return nil, err
 	}

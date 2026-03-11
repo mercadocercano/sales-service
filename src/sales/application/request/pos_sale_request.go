@@ -15,10 +15,10 @@ type POSSaleItemRequest struct {
 
 // POSSaleRequest request para venta directa POS multi-item
 // HITO B - Refactorizado para multi-item + descuentos
-// HITO: POST /pos/sale devuelve DTO listo para imprimir
+// HITO v0.6: customer_id ahora es OBLIGATORIO (validado contra customer-service)
 type POSSaleRequest struct {
+	CustomerID      uuid.UUID            `json:"customer_id" binding:"required"`      // HITO v0.6: Obligatorio
 	Items           []POSSaleItemRequest `json:"items" binding:"required,min=1,dive"` // Mínimo 1 item
-	CustomerID      *uuid.UUID           `json:"customer_id"`                         // Opcional (NULL = consumidor final)
 	PaymentMethodID uuid.UUID            `json:"payment_method_id" binding:"required"`
 	DiscountAmount  decimal.Decimal      `json:"discount_amount,omitempty"` // Descuento fijo (default: 0)
 	AmountPaid      decimal.Decimal      `json:"amount_paid" binding:"required"`      // Monto pagado por el cliente

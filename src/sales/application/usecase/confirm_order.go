@@ -105,14 +105,23 @@ func (uc *ConfirmOrderUseCase) publishSalesOrderConfirmedEvent(
 	order *entity.Order,
 	tenantID string,
 ) error {
-	// HITO v0.1: Total hardcoded para testing (sin productos reales)
-	totalAmount := 250.00 // Monto fijo para validación E2E
+	// Calcular total real desde los items con snapshots
+	totalAmount := order.CalculateTotal()
 
 	// Construir payload de negocio según contrato v1
+	// HITO v0.6: Usar customer_id real de la orden
+	customerID := order.CustomerID
+	if customerID == "" {
+		customerID = "00000000-0000-0000-0000-000000000001"
+	}
+	orderNum := 0
+	if order.OrderNumber != nil {
+		orderNum = *order.OrderNumber
+	}
 	businessPayload := map[string]interface{}{
-		"order_number": 0, // TODO: Implementar numeración secuencial
+		"order_number": orderNum,
 		"customer": map[string]interface{}{
-			"customer_id":   "00000000-0000-0000-0000-000000000001", // TODO: Obtener customer_id real
+			"customer_id":   customerID,
 			"customer_name": "Cliente Genérico",
 			"tax_condition": "CONSUMIDOR_FINAL",
 		},

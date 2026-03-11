@@ -1,4 +1,4 @@
-# Changelog - Order Service
+# Changelog - Sales Service
 
 All notable changes to this project will be documented in this file.
 
@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-02-20
+
+### HITO v0.5: HTTP Routes Alignment (Hard Cut)
+
+#### Changed - BREAKING CHANGES
+- **Rutas HTTP alineadas con dominio Sales:**
+  - `/api/v1/orders/*` → `/api/v1/sales/orders/*`
+  - `/api/v1/pos/sale` → `/api/v1/sales/pos`
+  - `/api/v1/pos/sales` → `/api/v1/sales/pos`
+- **Kong Gateway actualizado:**
+  - Ruta sales-service: `/orders/` → `/sales/`
+- **Versión del servicio:** `0.5.0-routes-alignment`
+
+#### Removed
+- ❌ Rutas legacy `/api/v1/orders/*` (404)
+- ❌ Rutas legacy `/api/v1/pos/*` (404)
+
+#### Updated
+- `README.md` - Documentación de endpoints actualizada
+- `scripts/test-snapshot-feature.sh` - Rutas actualizadas
+- `test-pos-sale.sh` - Rutas actualizadas
+- `scripts/test-pos-sale-complete-dto.sh` - Rutas actualizadas
+
+#### Architecture
+- ✅ Naming coherente en código (v0.2)
+- ✅ Naming coherente en DB (v0.2)
+- ✅ Naming coherente en rutas (v0.5) ⭐ NUEVO
+- ✅ Naming coherente en eventos (v0.1)
+- ✅ Naming coherente en repo (v0.2)
+
+**Sin deuda técnica de naming. Arquitectura limpia.**
+
+#### Documentation
+- `HITO_V0.5_ROUTES_ALIGNMENT.md` - Documentación completa del hito
 
 ## [1.1.0] - 2025-02-08
 
