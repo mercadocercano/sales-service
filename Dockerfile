@@ -1,9 +1,6 @@
 # ==============================================
 # Sales Service - Multi-stage Dockerfile
 # ==============================================
-# Build desde raíz del monorepo (eventbus en libs/):
-#   docker build -f services/sales-service/Dockerfile .
-# ==============================================
 
 # ==============================================
 # Stage 1: Dependencies and cache optimization
@@ -11,12 +8,10 @@
 FROM golang:1.22-alpine AS deps
 WORKDIR /app
 
-# Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata
 
-# Copy sales-service + libs/eventbus (replace en go.mod)
-COPY services/sales-service/go.mod services/sales-service/go.sum ./
-COPY libs/eventbus /libs/eventbus
+COPY go.mod go.sum ./
+COPY libs/eventbus ./libs/eventbus
 RUN go mod download && go mod verify
 
 # ==============================================
@@ -24,8 +19,7 @@ RUN go mod download && go mod verify
 # ==============================================
 FROM deps AS builder
 
-# Copy source code
-COPY services/sales-service/ .
+COPY . .
 
 # Build optimized binary with security hardening
 RUN CGO_ENABLED=0 GOOS=linux go build \

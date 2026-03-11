@@ -1,0 +1,153 @@
+libs/eventbus/
+│
+├── 📄 go.mod                           # Módulo Go independiente
+├── 📄 Makefile                         # Comandos automatizados
+├── 📄 .env.example                     # Configuración de ejemplo
+├── 📄 .gitignore                       # Git ignore rules
+│
+├── 📚 README.md                        # Documentación principal
+├── 📚 ARCHITECTURE.md                  # Detalles técnicos
+├── 📚 HITO_1_CLOSURE.md               # Documento de cierre
+├── 📚 STRUCTURE.txt                    # Este archivo
+│
+├── 🚀 cmd/
+│   └── worker/
+│       └── main.go                     # Worker ejecutable principal
+│
+├── 🏗️ internal/
+│   ├── domain/                         # Capa de dominio (ports)
+│   │   ├── event.go                    # DomainEvent interface
+│   │   ├── event_store.go              # EventStore port
+│   │   ├── consumer.go                 # EventHandler interface
+│   │   └── errors.go                   # Domain errors
+│   │
+│   ├── application/                    # Casos de uso
+│   │   ├── publish_event.go            # Publicar eventos
+│   │   └── process_event.go            # Procesar eventos con retry
+│   │
+│   ├── infrastructure/                 # Adaptadores (implementaciones)
+│   │   ├── persistence/
+│   │   │   └── sql_event_store.go      # Adaptador PostgreSQL
+│   │   ├── worker/
+│   │   │   └── event_worker.go         # Worker genérico con polling
+│   │   └── config/
+│   │       └── config.go               # Configuración por ENV
+│   │
+│   └── shared/                         # Utilities compartidas
+│       └── logger.go                   # Logger estructurado JSON
+│
+├── 🗄️ migrations/
+│   ├── 001_create_event_bus_tables.up.sql     # Migración UP
+│   └── 001_create_event_bus_tables.down.sql   # Migración DOWN (rollback)
+│
+├── 💡 examples/                        # Ejemplos funcionales
+│   ├── simple_publisher/
+│   │   └── main.go                     # Ejemplo de publicar eventos
+│   └── simple_consumer/
+│       └── main.go                     # Ejemplo de consumir eventos
+│
+├── 🛠️ scripts/
+│   └── setup.sh                        # Script de instalación completo
+│
+└── 📦 bin/                             # Binarios compilados (gitignored)
+    ├── worker                          # Worker principal
+    ├── simple_publisher                # Publisher de ejemplo
+    └── simple_consumer                 # Consumer de ejemplo
+
+═══════════════════════════════════════════════════════════════════
+
+ARQUITECTURA HEXAGONAL:
+
+┌─────────────────────────────────────────────────────────────┐
+│                     APPLICATION LAYER                       │
+│  ┌──────────────────┐       ┌──────────────────┐          │
+│  │ PublishEventUC   │       │ ProcessEventUC   │          │
+│  └──────────────────┘       └──────────────────┘          │
+└───────────────────────┬─────────────────────────────────────┘
+                        │
+┌───────────────────────▼─────────────────────────────────────┐
+│                      DOMAIN LAYER                           │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
+│  │ DomainEvent  │  │  EventStore  │  │EventHandler  │    │
+│  │ (interface)  │  │    (port)    │  │ (interface)  │    │
+│  └──────────────┘  └──────────────┘  └──────────────┘    │
+└───────────────────────┬─────────────────────────────────────┘
+                        │
+┌───────────────────────▼─────────────────────────────────────┐
+│                 INFRASTRUCTURE LAYER                        │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
+│  │SQLEventStore │  │ EventWorker  │  │    Config    │    │
+│  │  (adapter)   │  │  (adapter)   │  │  (adapter)   │    │
+│  └──────────────┘  └──────────────┘  └──────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════
+
+FLUJO DE DATOS:
+
+1. PUBLICACIÓN:
+   Sales Service → PublishEventUseCase → SQLEventStore → PostgreSQL
+
+2. CONSUMO:
+   EventWorker → ProcessEventUseCase → EventHandler → Business Logic
+        ↓                                    ↓
+   GetUnprocessed()                    Handle(event)
+        ↓                                    ↓
+   MarkProcessed() / MarkFailed() / IncrementRetry()
+
+═══════════════════════════════════════════════════════════════════
+
+BASE DE DATOS:
+
+┌──────────────────────────────────────┐
+│          event_bus                   │  (append-only)
+├──────────────────────────────────────┤
+│ id             UUID      PK          │
+│ aggregate_type VARCHAR(100)          │
+│ aggregate_id   UUID                  │
+│ event_type     VARCHAR(100)          │
+│ payload_json   JSONB                 │
+│ occurred_at    TIMESTAMP             │
+│ published_by   VARCHAR(100)          │
+└──────────────────────────────────────┘
+              │
+              │ 1:N
+              ▼
+┌──────────────────────────────────────┐
+│       event_consumers                │  (tracking)
+├──────────────────────────────────────┤
+│ event_id       UUID      PK          │
+│ consumer_name  VARCHAR   PK          │
+│ processed_at   TIMESTAMP             │
+│ status         VARCHAR(50)           │
+│ retry_count    INT                   │
+│ last_error     TEXT                  │
+└──────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════
+
+CARACTERÍSTICAS CLAVE:
+
+✅ Hexagonal Architecture (Ports & Adapters)
+✅ Domain-Driven Design (DDD)
+✅ SOLID Principles
+✅ At-least-once delivery
+✅ Idempotencia por consumidor
+✅ Retry automático (max 3)
+✅ Backoff exponencial
+✅ Worker genérico reutilizable
+✅ Logs estructurados JSON
+✅ Configuración por ENV
+✅ Sin dependencias de dominio
+✅ Migrable a Redis/Kafka
+
+═══════════════════════════════════════════════════════════════════
+
+COMPILACIÓN EXITOSA ✅
+
+$ go build -o bin/worker ./cmd/worker
+$ go build -o bin/simple_publisher ./examples/simple_publisher
+$ go build -o bin/simple_consumer ./examples/simple_consumer
+
+Total: ~1,500 líneas de código Go
+Estado: PRODUCTION READY 🚀
