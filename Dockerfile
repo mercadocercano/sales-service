@@ -5,7 +5,7 @@
 # ==============================================
 # Stage 1: Dependencies and cache optimization
 # ==============================================
-FROM golang:1.22-alpine AS deps
+FROM golang:1.24-alpine AS deps
 WORKDIR /app
 
 RUN apk add --no-cache git ca-certificates tzdata
@@ -31,7 +31,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # ==============================================
 # Stage 3: Development stage (with hot reload)
 # ==============================================
-FROM golang:1.22-alpine AS development
+FROM golang:1.24-alpine AS development
 
 # Security: Create non-root user first
 RUN addgroup -g 1001 -S appgroup && \
