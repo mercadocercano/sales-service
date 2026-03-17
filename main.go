@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log"
 	"os"
+	"time"
 
 	apiConfig "sales/src/api/config"
 	salesService "sales/src/sales/application/service"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq" // Driver de PostgreSQL
+	tenantmw "github.com/mercadocercano/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	
 	"github.com/mercadocercano/eventbus"
@@ -33,6 +35,38 @@ func getEnv(key, defaultValue string) string {
 	return value
 }
 
+// connectWithRetry intenta conectar a PostgreSQL con backoff exponencial.
+// Retorna nil si no logra conectar después de todos los reintentos.
+func connectWithRetry(connStr, label string, maxRetries int) *sql.DB {
+	backoff := 2 * time.Second
+	const maxBackoff = 30 * time.Second
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		db, err := sql.Open("postgres", connStr)
+		if err != nil {
+			log.Printf("⚠️  [%s] Intento %d/%d - Error al abrir conexión: %v", label, attempt, maxRetries, err)
+		} else if err = db.Ping(); err != nil {
+			log.Printf("⚠️  [%s] Intento %d/%d - Ping falló: %v", label, attempt, maxRetries, err)
+			db.Close()
+		} else {
+			log.Printf("✅ Conexión a %s establecida con éxito (intento %d)", label, attempt)
+			return db
+		}
+
+		if attempt < maxRetries {
+			log.Printf("🔄 [%s] Reintentando en %v...", label, backoff)
+			time.Sleep(backoff)
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
+
+	log.Printf("❌ [%s] No se pudo conectar después de %d intentos. Continuando sin DB.", label, maxRetries)
+	return nil
+}
+
 func main() {
 	log.Println("🚀 Sales Service - HITO v0.5 - HTTP Routes Alignment - Iniciando...")
 
@@ -42,6 +76,13 @@ func main() {
 	// Agregar middlewares básicos necesarios
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
+	router.Use(tenantmw.TenantValidation(tenantmw.TenantValidationConfig{
+		JWTSecret: os.Getenv("JWT_SECRET"),
+		ExcludedRoutes: []string{
+			"/health",
+			"/metrics",
+		},
+	}))
 
 	// Configurar Prometheus metrics si está habilitado
 	prometheusEnabled := os.Getenv("PROMETHEUS_ENABLED")
@@ -66,88 +107,43 @@ func main() {
 	dbPassword := getEnv("DB_PASSWORD", "postgres")
 	dbName := getEnv("DB_NAME", "order_db")
 
-	// Crear string de conexión para order_db
+	// Máximo de reintentos para conexiones DB (cubre ~60s de espera con backoff exponencial)
+	maxRetries := 10
+
+	// Conectar a order_db con retry
 	connStr := "postgres://" + dbUser + ":" + dbPassword + "@" + dbHost + ":" + dbPort + "/" + dbName + "?sslmode=disable"
 	log.Printf("Intentando conectar a order_db: %s", connStr)
-
-	// Conectar a la base de datos (opcional para bootstrap)
-	db, err := sql.Open("postgres", connStr)
-	if err != nil {
-		log.Printf("⚠️  Advertencia: Error al conectar a la base de datos: %v", err)
-		log.Println("⚠️  Continuando sin DB (solo health check)")
-		db = nil
-	} else {
+	db := connectWithRetry(connStr, "order_db", maxRetries)
+	if db != nil {
 		defer db.Close()
-		// Comprobar la conexión
-		err = db.Ping()
-		if err != nil {
-			log.Printf("⚠️  Advertencia: Error al verificar la conexión a la base de datos: %v", err)
-			log.Println("⚠️  Continuando sin DB (solo health check)")
-			db = nil
-		} else {
-			log.Println("✅ Conexión a order_db establecida con éxito")
-		}
 	}
 
-	// HITO: Conectar a payment_method_db para cache de métodos de pago
+	// Conectar a payment_method_db con retry
 	pmDBName := getEnv("PAYMENT_METHOD_DB_NAME", "payment_method_db")
 	pmConnStr := "postgres://" + dbUser + ":" + dbPassword + "@" + dbHost + ":" + dbPort + "/" + pmDBName + "?sslmode=disable"
 	log.Printf("Intentando conectar a payment_method_db: %s", pmConnStr)
-
-	var paymentMethodDB *sql.DB
-	paymentMethodDB, err = sql.Open("postgres", pmConnStr)
-	if err != nil {
-		log.Printf("⚠️  Advertencia: Error al conectar a payment_method_db: %v", err)
-		log.Println("⚠️  Continuando sin payment method cache")
-		paymentMethodDB = nil
-	} else {
+	paymentMethodDB := connectWithRetry(pmConnStr, "payment_method_db", maxRetries)
+	if paymentMethodDB != nil {
 		defer paymentMethodDB.Close()
-		err = paymentMethodDB.Ping()
-		if err != nil {
-			log.Printf("⚠️  Advertencia: Error al verificar conexión a payment_method_db: %v", err)
-			log.Println("⚠️  Continuando sin payment method cache")
-			paymentMethodDB = nil
-		} else {
-			log.Println("✅ Conexión a payment_method_db establecida con éxito")
-		}
 	}
 
-	// HITO v0.1: Conectar a EventBus DB
+	// Conectar a EventBus DB con retry
 	eventBusHost := getEnv("EVENTBUS_DB_HOST", dbHost)
 	eventBusPort := getEnv("EVENTBUS_DB_PORT", "5432")
 	eventBusUser := getEnv("EVENTBUS_DB_USER", dbUser)
 	eventBusPassword := getEnv("EVENTBUS_DB_PASSWORD", dbPassword)
 	eventBusName := getEnv("EVENTBUS_DB_NAME", "eventbus")
-	
+
 	eventBusConnStr := "postgres://" + eventBusUser + ":" + eventBusPassword + "@" + eventBusHost + ":" + eventBusPort + "/" + eventBusName + "?sslmode=disable"
 	log.Printf("Intentando conectar a eventbus: %s", eventBusConnStr)
-	
-	var eventBusDB *sql.DB
+	eventBusDB := connectWithRetry(eventBusConnStr, "eventbus", maxRetries)
+
 	var publishUseCase *eventbus.PublishEventUseCase
-	
-	eventBusDB, err = sql.Open("postgres", eventBusConnStr)
-	if err != nil {
-		log.Printf("⚠️  Advertencia: Error al conectar a eventbus: %v", err)
-		log.Println("⚠️  Continuando sin publicación de eventos")
-		publishUseCase = nil
-	} else {
-		err = eventBusDB.Ping()
-		if err != nil {
-			log.Printf("⚠️  Advertencia: Error al verificar conexión a eventbus: %v", err)
-			log.Println("⚠️  Continuando sin publicación de eventos")
-			publishUseCase = nil
-		} else {
-			log.Println("✅ Conexión a eventbus establecida con éxito")
-			
-			// Inicializar eventbus publisher
-			logger := eventbus.NewLogger(eventbus.LevelInfo)
-			eventStore := eventbus.NewSQLEventStore(eventBusDB, logger)
-			publishUseCase = eventbus.NewPublishEventUseCase(eventStore, logger)
-			
-			if eventBusDB != nil {
-				defer eventBusDB.Close()
-			}
-		}
+	if eventBusDB != nil {
+		defer eventBusDB.Close()
+		logger := eventbus.NewLogger(eventbus.LevelInfo)
+		eventStore := eventbus.NewSQLEventStore(eventBusDB, logger)
+		publishUseCase = eventbus.NewPublishEventUseCase(eventStore, logger)
 	}
 
 	// API v1 grupo de rutas
