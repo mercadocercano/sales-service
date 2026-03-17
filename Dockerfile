@@ -10,8 +10,12 @@ WORKDIR /app
 
 RUN apk add --no-cache git ca-certificates tzdata
 
+# Configure private Go modules
+ARG GITHUB_TOKEN
+ENV GOPRIVATE=github.com/mercadocercano/*
+RUN if [ -n "$GITHUB_TOKEN" ]; then git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; fi
+
 COPY go.mod go.sum ./
-COPY libs/eventbus ./libs/eventbus
 RUN go mod download && go mod verify
 
 # ==============================================
@@ -49,6 +53,11 @@ RUN apk add --no-cache \
     && apk del tzdata
 
 WORKDIR /app
+
+# Configure private Go modules
+ARG GITHUB_TOKEN
+ENV GOPRIVATE=github.com/mercadocercano/*
+RUN if [ -n "$GITHUB_TOKEN" ]; then git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; fi
 
 # Copy go mod files first (for better caching)
 COPY go.mod go.sum ./

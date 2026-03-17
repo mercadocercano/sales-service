@@ -36,6 +36,7 @@ jobs:
             --target production \
             --provenance=false \
             --sbom=false \
+            --build-arg GITHUB_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }} \
             -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
             -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
             --push \
