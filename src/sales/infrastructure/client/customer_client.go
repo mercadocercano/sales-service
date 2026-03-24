@@ -44,7 +44,7 @@ func (c *CustomerClient) Exists(ctx context.Context, tenantID uuid.UUID, custome
 	// Agregar headers
 	req.Header.Set("X-Tenant-ID", tenantID.String())
 	if authToken != "" {
-		req.Header.Set("Authorization", "Bearer "+authToken)
+		req.Header.Set("Authorization", authToken)
 	}
 
 	// Ejecutar request
