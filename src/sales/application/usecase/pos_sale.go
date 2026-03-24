@@ -72,6 +72,11 @@ func (uc *POSSaleUseCase) Execute(tenantID, authToken string, req *request.POSSa
 	if req.PaymentMethodID == uuid.Nil {
 		return nil, fmt.Errorf("payment_method_id is required")
 	}
+	if uc.paymentMethodCache != nil {
+		if _, exists := uc.paymentMethodCache.Get(req.PaymentMethodID); !exists {
+			return nil, fmt.Errorf("payment_method_not_found: %s", req.PaymentMethodID)
+		}
+	}
 	if len(req.Items) == 0 {
 		return nil, fmt.Errorf("at least one item is required")
 	}
