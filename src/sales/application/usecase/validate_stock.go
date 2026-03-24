@@ -20,13 +20,13 @@ func NewValidateStockUseCase(stockClient *client.StockClient) *ValidateStockUseC
 }
 
 // Execute ejecuta la validación de stock (multi-item)
-func (uc *ValidateStockUseCase) Execute(tenantID, authToken string, req *request.ValidateStockRequest) (*response.ValidateStockResponse, error) {
+func (uc *ValidateStockUseCase) Execute(tenantID string, req *request.ValidateStockRequest) (*response.ValidateStockResponse, error) {
 	var itemsResponse []response.ValidateStockItemResponse
 	allValid := true
 
 	// Validar cada item
 	for _, item := range req.Items {
-		stockResp, hasEnoughStock, err := uc.stockClient.ValidateStock(tenantID, authToken, item.SKU, item.Quantity)
+		stockResp, hasEnoughStock, err := uc.stockClient.ValidateStock(tenantID, item.SKU, item.Quantity)
 		if err != nil {
 			return nil, fmt.Errorf("error validating stock for SKU %s: %w", item.SKU, err)
 		}

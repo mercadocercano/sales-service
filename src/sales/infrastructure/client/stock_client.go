@@ -82,24 +82,27 @@ type StockRevertConsumeResponse struct {
 	Reference    string `json:"reference"`
 }
 
-// StockClient cliente HTTP para comunicarse con stock-service vía Kong
+// StockClient cliente HTTP para comunicarse con stock-service vía Kong (S2S)
 type StockClient struct {
 	httpClient *http.Client
 	kongURL    string
 	stockPath  string
+	apiKey     string
 }
 
-// NewStockClient crea una nueva instancia del cliente
+// NewStockClient crea una nueva instancia del cliente con autenticación S2S
 func NewStockClient() *StockClient {
 	kongURL := os.Getenv("KONG_INTERNAL_URL")
 	if kongURL == "" {
-		kongURL = "http://kong:8000" // Default para entorno Docker
+		kongURL = "http://kong:8000"
 	}
 
 	stockPath := os.Getenv("STOCK_SERVICE_PATH")
 	if stockPath == "" {
-		stockPath = "/stock" // Default
+		stockPath = "/internal/stock"
 	}
+
+	apiKey := os.Getenv("S2S_API_KEY")
 
 	return &StockClient{
 		httpClient: &http.Client{
@@ -107,11 +110,12 @@ func NewStockClient() *StockClient {
 		},
 		kongURL:   kongURL,
 		stockPath: stockPath,
+		apiKey:    apiKey,
 	}
 }
 
 // ValidateStock valida disponibilidad de stock vía Kong usando GET /availability
-func (c *StockClient) ValidateStock(tenantID, authToken, sku string, quantity int) (*StockAvailabilityResponse, bool, error) {
+func (c *StockClient) ValidateStock(tenantID, sku string, quantity int) (*StockAvailabilityResponse, bool, error) {
 	// Construir URL completa vía Kong con query parameter
 	url := fmt.Sprintf("%s%s/api/v1/availability?sku=%s", c.kongURL, c.stockPath, sku)
 
@@ -124,9 +128,9 @@ func (c *StockClient) ValidateStock(tenantID, authToken, sku string, quantity in
 	// Headers obligatorios
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	// Pasar Authorization si existe
-	if authToken != "" {
-		req.Header.Set("Authorization", authToken)
+	// Autenticación S2S via API Key
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	// Ejecutar request
@@ -160,7 +164,7 @@ func (c *StockClient) ValidateStock(tenantID, authToken, sku string, quantity in
 }
 
 // ReserveStock reserva stock vía Kong usando POST /reserve
-func (c *StockClient) ReserveStock(tenantID, authToken, sku string, quantity int, reference string) (*StockReserveResponse, error) {
+func (c *StockClient) ReserveStock(tenantID, sku string, quantity int, reference string) (*StockReserveResponse, error) {
 	// Preparar request body
 	reqBody := StockReserveRequest{
 		SKU:       sku,
@@ -186,9 +190,9 @@ func (c *StockClient) ReserveStock(tenantID, authToken, sku string, quantity int
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	// Pasar Authorization si existe
-	if authToken != "" {
-		req.Header.Set("Authorization", authToken)
+	// Autenticación S2S via API Key
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	// Ejecutar request
@@ -222,7 +226,7 @@ func (c *StockClient) ReserveStock(tenantID, authToken, sku string, quantity int
 }
 
 // ReleaseStock libera stock reservado vía Kong usando POST /release
-func (c *StockClient) ReleaseStock(tenantID, authToken, sku string, quantity int, reference string) (*StockReleaseResponse, error) {
+func (c *StockClient) ReleaseStock(tenantID, sku string, quantity int, reference string) (*StockReleaseResponse, error) {
 	// Preparar request body
 	reqBody := StockReleaseRequest{
 		SKU:       sku,
@@ -248,9 +252,9 @@ func (c *StockClient) ReleaseStock(tenantID, authToken, sku string, quantity int
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	// Pasar Authorization si existe
-	if authToken != "" {
-		req.Header.Set("Authorization", authToken)
+	// Autenticación S2S via API Key
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	// Ejecutar request
@@ -284,7 +288,7 @@ func (c *StockClient) ReleaseStock(tenantID, authToken, sku string, quantity int
 }
 
 // ConsumeStock consume stock reservado vía Kong usando POST /consume
-func (c *StockClient) ConsumeStock(tenantID, authToken, sku string, quantity int, reference string) (*StockConsumeResponse, error) {
+func (c *StockClient) ConsumeStock(tenantID, sku string, quantity int, reference string) (*StockConsumeResponse, error) {
 	// Preparar request body
 	reqBody := StockConsumeRequest{
 		SKU:       sku,
@@ -310,9 +314,9 @@ func (c *StockClient) ConsumeStock(tenantID, authToken, sku string, quantity int
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	// Pasar Authorization si existe
-	if authToken != "" {
-		req.Header.Set("Authorization", authToken)
+	// Autenticación S2S via API Key
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	// Ejecutar request
@@ -346,7 +350,7 @@ func (c *StockClient) ConsumeStock(tenantID, authToken, sku string, quantity int
 }
 
 // RevertConsume revierte un consumo de stock vía Kong usando POST /revert-consume
-func (c *StockClient) RevertConsume(tenantID, authToken, sku string, quantity int, reference string) (*StockRevertConsumeResponse, error) {
+func (c *StockClient) RevertConsume(tenantID, sku string, quantity int, reference string) (*StockRevertConsumeResponse, error) {
 	// Preparar request body
 	reqBody := StockRevertConsumeRequest{
 		SKU:       sku,
@@ -372,9 +376,9 @@ func (c *StockClient) RevertConsume(tenantID, authToken, sku string, quantity in
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	// Pasar Authorization si existe
-	if authToken != "" {
-		req.Header.Set("Authorization", authToken)
+	// Autenticación S2S via API Key
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	// Ejecutar request
@@ -427,7 +431,7 @@ type DirectSaleResponse struct {
 
 // DirectSale realiza una venta directa POS vía Kong usando POST /sale
 // No crea orden, no reserva, venta inmediata (available↓, total↓)
-func (c *StockClient) DirectSale(tenantID, authToken, sku string, quantity int, reference, notes string) (*DirectSaleResponse, error) {
+func (c *StockClient) DirectSale(tenantID, sku string, quantity int, reference, notes string) (*DirectSaleResponse, error) {
 	// Preparar request body
 	reqBody := DirectSaleRequest{
 		VariantSKU: sku,
@@ -454,9 +458,9 @@ func (c *StockClient) DirectSale(tenantID, authToken, sku string, quantity int, 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	// Pasar Authorization si existe
-	if authToken != "" {
-		req.Header.Set("Authorization", authToken)
+	// Autenticación S2S via API Key
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	// Ejecutar request
@@ -499,7 +503,7 @@ func (c *StockClient) DirectSale(tenantID, authToken, sku string, quantity int, 
 //
 // DEPRECATED: Este método tiene race condition entre check y sale.
 // Usar ProcessSaleAtomic() en su lugar.
-func (c *StockClient) CheckAvailability(tenantID, authToken, sku string, quantity int) (bool, error) {
+func (c *StockClient) CheckAvailability(tenantID, sku string, quantity int) (bool, error) {
 	// Construir URL completa vía Kong con query parameter
 	url := fmt.Sprintf("%s%s/api/v1/availability?sku=%s", c.kongURL, c.stockPath, sku)
 
@@ -512,9 +516,9 @@ func (c *StockClient) CheckAvailability(tenantID, authToken, sku string, quantit
 	// Headers obligatorios
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	// Pasar Authorization si existe
-	if authToken != "" {
-		req.Header.Set("Authorization", authToken)
+	// Autenticación S2S via API Key
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	// Ejecutar request
@@ -558,7 +562,7 @@ func (c *StockClient) CheckAvailability(tenantID, authToken, sku string, quantit
 //
 // DEPRECATED: Usar ProcessSaleAtomic() que retorna stock_entry_id para compensación.
 // Este método no retorna el ID necesario para CompensateSale().
-func (c *StockClient) ProcessSale(tenantID, authToken, sku string, quantity int, orderID string) error {
+func (c *StockClient) ProcessSale(tenantID, sku string, quantity int, orderID string) error {
 	// Preparar request body
 	reqBody := DirectSaleRequest{
 		VariantSKU: sku,
@@ -585,9 +589,9 @@ func (c *StockClient) ProcessSale(tenantID, authToken, sku string, quantity int,
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	// Pasar Authorization si existe
-	if authToken != "" {
-		req.Header.Set("Authorization", authToken)
+	// Autenticación S2S via API Key
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	// Ejecutar request
@@ -649,7 +653,7 @@ type ProcessSaleAtomicResponse struct {
 // HITO D: Elimina race condition, valida y descuenta en una sola transacción
 // Retorna stock_entry_id para posterior compensación si es necesario
 func (c *StockClient) ProcessSaleAtomic(
-	tenantID, authToken, sku string,
+	tenantID, sku string,
 	quantity float64,
 	reference string,
 ) (*ProcessSaleAtomicResponse, error) {
@@ -678,8 +682,9 @@ func (c *StockClient) ProcessSaleAtomic(
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	if authToken != "" {
-		req.Header.Set("Authorization", authToken)
+	// Autenticación S2S via API Key
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	// Ejecutar request
@@ -714,7 +719,7 @@ type CompensateSaleRequest struct {
 // CompensateSale revierte una venta creando movimiento inverso
 // HITO D: Usado para rollback cuando falla creación de orden
 func (c *StockClient) CompensateSale(
-	tenantID, authToken string,
+	tenantID string,
 	stockEntryID string,
 	reason string,
 ) error {
@@ -742,8 +747,9 @@ func (c *StockClient) CompensateSale(
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	if authToken != "" {
-		req.Header.Set("Authorization", authToken)
+	// Autenticación S2S via API Key
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	// Ejecutar request

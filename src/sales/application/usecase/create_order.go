@@ -47,7 +47,7 @@ func NewCreateOrderUseCase(
 // 4. Si falla un item → compensar todos los anteriores
 // 5. Persistir orden
 // 6. Si falla persistencia → compensar todo el stock descontado
-func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID, authToken string, req *request.CreateOrderRequest) (*response.CreateOrderResponse, error) {
+func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID string, req *request.CreateOrderRequest) (*response.CreateOrderResponse, error) {
 	if len(req.Items) == 0 {
 		return nil, fmt.Errorf("order must contain at least one item")
 	}
@@ -60,7 +60,7 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID, authToken s
 		return nil, fmt.Errorf("invalid tenant_id: %w", err)
 	}
 
-	exists, err := uc.customerClient.Exists(ctx, tenantUUID, req.CustomerID, authToken)
+	exists, err := uc.customerClient.Exists(ctx, tenantUUID, req.CustomerID)
 	if err != nil {
 		// Error técnico comunicándose con customer-service
 		return nil, fmt.Errorf("error validating customer: %w", err)
@@ -81,7 +81,7 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID, authToken s
 		}
 
 		// Intentar obtener snapshots de PIM para trazabilidad (best effort)
-		productSnapshot, variantSnapshot, err := uc.pimClient.GetSnapshotForSKU(tenantID, authToken, itemReq.SKU)
+		productSnapshot, variantSnapshot, err := uc.pimClient.GetSnapshotForSKU(tenantID, itemReq.SKU)
 		if err != nil {
 			// PIM falló - loggear pero NO bloquear
 			// Sales es autosuficiente con el unit_price recibido
@@ -117,7 +117,6 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID, authToken s
 	for _, item := range order.Items {
 		saleResp, err := uc.stockClient.ProcessSaleAtomic(
 			tenantID,
-			authToken,
 			item.SKU,
 			float64(item.Quantity),
 			order.OrderID, // Reference para trazabilidad
@@ -125,13 +124,13 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID, authToken s
 
 		if err != nil {
 			// Error técnico (HTTP, network, etc.)
-			uc.compensateProcessedStock(ctx, tenantID, authToken, processedStockEntries, "order_creation_failed")
+			uc.compensateProcessedStock(ctx, tenantID, processedStockEntries, "order_creation_failed")
 			return nil, fmt.Errorf("error processing stock for SKU %s: %w", item.SKU, err)
 		}
 
 		if !saleResp.Success {
 			// Error de negocio (stock insuficiente, no inicializado, etc.)
-			uc.compensateProcessedStock(ctx, tenantID, authToken, processedStockEntries, "insufficient_stock")
+			uc.compensateProcessedStock(ctx, tenantID, processedStockEntries, "insufficient_stock")
 			return nil, fmt.Errorf("stock rejected for SKU %s: %s", item.SKU, saleResp.Message)
 		}
 
@@ -144,7 +143,7 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID, authToken s
 	// ========================================================================
 	if err := uc.orderRepo.Save(ctx, order); err != nil {
 		// CRÍTICO: Stock ya fue descontado, debemos revertirlo
-		uc.compensateProcessedStock(ctx, tenantID, authToken, processedStockEntries, "order_persistence_failed")
+		uc.compensateProcessedStock(ctx, tenantID, processedStockEntries, "order_persistence_failed")
 		return nil, fmt.Errorf("error saving order (stock compensated): %w", err)
 	}
 
@@ -172,12 +171,12 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID, authToken s
 // HITO D: Función crítica para garantizar consistencia transaccional
 func (uc *CreateOrderUseCase) compensateProcessedStock(
 	ctx context.Context,
-	tenantID, authToken string,
+	tenantID string,
 	stockEntryIDs []string,
 	reason string,
 ) {
 	for _, entryID := range stockEntryIDs {
-		err := uc.stockClient.CompensateSale(tenantID, authToken, entryID, reason)
+		err := uc.stockClient.CompensateSale(tenantID, entryID, reason)
 		if err != nil {
 			// CRÍTICO: Si falla compensación, log para auditoría manual
 			// No hacer panic ni detener el flujo

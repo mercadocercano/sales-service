@@ -163,10 +163,7 @@ func (c *OrderController) CancelOrder(ctx *gin.Context) {
 		return
 	}
 
-	// 2. Obtener Authorization header
-	authToken := ctx.GetHeader("Authorization")
-
-	// 3. Obtener order_id del path
+	// 2. Obtener order_id del path
 	orderID := ctx.Param("order_id")
 	if orderID == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{
@@ -175,8 +172,8 @@ func (c *OrderController) CancelOrder(ctx *gin.Context) {
 		return
 	}
 
-	// 4. Ejecutar use case
-	order, err := c.cancelOrderUC.Execute(ctx.Request.Context(), tenantID, authToken, orderID)
+	// 3. Ejecutar use case
+	order, err := c.cancelOrderUC.Execute(ctx.Request.Context(), tenantID, orderID)
 	if err != nil {
 		log.Printf("Error canceling order: %v", err)
 
@@ -228,10 +225,7 @@ func (c *OrderController) ConfirmOrder(ctx *gin.Context) {
 		return
 	}
 
-	// 2. Obtener Authorization header
-	authToken := ctx.GetHeader("Authorization")
-
-	// 3. Obtener order_id del path
+	// 2. Obtener order_id del path
 	orderID := ctx.Param("order_id")
 	if orderID == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{
@@ -240,7 +234,7 @@ func (c *OrderController) ConfirmOrder(ctx *gin.Context) {
 		return
 	}
 
-	// 4. Validar body
+	// 3. Validar body
 	var req request.ConfirmOrderRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
@@ -250,8 +244,8 @@ func (c *OrderController) ConfirmOrder(ctx *gin.Context) {
 		return
 	}
 
-	// 5. Ejecutar use case
-	order, err := c.confirmOrderUC.Execute(ctx.Request.Context(), tenantID, authToken, orderID, req.Reference)
+	// 4. Ejecutar use case
+	order, err := c.confirmOrderUC.Execute(ctx.Request.Context(), tenantID, orderID, req.Reference)
 	if err != nil {
 		log.Printf("Error confirming order: %v", err)
 
@@ -309,10 +303,7 @@ func (c *OrderController) CreateOrder(ctx *gin.Context) {
 		return
 	}
 
-	// 2. Obtener Authorization header
-	authToken := ctx.GetHeader("Authorization")
-
-	// 3. Validar body
+	// 2. Validar body
 	var req request.CreateOrderRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
@@ -322,8 +313,8 @@ func (c *OrderController) CreateOrder(ctx *gin.Context) {
 		return
 	}
 
-	// 4. Ejecutar use case con snapshots de PIM
-	resp, err := c.createOrderUC.Execute(ctx.Request.Context(), tenantID, authToken, &req)
+	// 3. Ejecutar use case con snapshots de PIM
+	resp, err := c.createOrderUC.Execute(ctx.Request.Context(), tenantID, &req)
 	if err != nil {
 		log.Printf("Error creating order: %v", err)
 
@@ -358,10 +349,7 @@ func (c *OrderController) ReleaseStock(ctx *gin.Context) {
 		return
 	}
 
-	// 2. Obtener Authorization header (pasarlo tal cual)
-	authToken := ctx.GetHeader("Authorization")
-
-	// 3. Validar body
+	// 2. Validar body
 	var req request.ReleaseStockRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
@@ -371,8 +359,8 @@ func (c *OrderController) ReleaseStock(ctx *gin.Context) {
 		return
 	}
 
-	// 4. Ejecutar use case
-	resp, err := c.releaseStockUC.Execute(tenantID, authToken, &req)
+	// 3. Ejecutar use case
+	resp, err := c.releaseStockUC.Execute(tenantID, &req)
 	if err != nil {
 		log.Printf("Error releasing stock: %v", err)
 
@@ -407,10 +395,7 @@ func (c *OrderController) ReserveStock(ctx *gin.Context) {
 		return
 	}
 
-	// 2. Obtener Authorization header (pasarlo tal cual)
-	authToken := ctx.GetHeader("Authorization")
-
-	// 3. Validar body
+	// 2. Validar body
 	var req request.ReserveStockRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
@@ -420,8 +405,8 @@ func (c *OrderController) ReserveStock(ctx *gin.Context) {
 		return
 	}
 
-	// 4. Ejecutar use case
-	resp, err := c.reserveStockUC.Execute(tenantID, authToken, &req)
+	// 3. Ejecutar use case
+	resp, err := c.reserveStockUC.Execute(tenantID, &req)
 	if err != nil {
 		log.Printf("Error reserving stock: %v", err)
 
@@ -629,10 +614,7 @@ func (c *OrderController) POSSale(ctx *gin.Context) {
 		return
 	}
 
-	// 2. Obtener Authorization header
-	authToken := ctx.GetHeader("Authorization")
-
-	// 3. Validar body
+	// 2. Validar body
 	var req request.POSSaleRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		metrics.POSSalesFailed.Inc()
@@ -643,8 +625,8 @@ func (c *OrderController) POSSale(ctx *gin.Context) {
 		return
 	}
 
-	// 4. Ejecutar use case
-	resp, err := c.posSaleUC.Execute(tenantID, authToken, &req)
+	// 3. Ejecutar use case
+	resp, err := c.posSaleUC.Execute(tenantID, &req)
 	durationMs := time.Since(start).Milliseconds()
 	metrics.POSSaleLatency.Observe(float64(durationMs))
 
@@ -692,10 +674,7 @@ func (c *OrderController) ValidateStock(ctx *gin.Context) {
 		return
 	}
 
-	// 2. Obtener Authorization header (pasarlo tal cual, no validar)
-	authToken := ctx.GetHeader("Authorization")
-
-	// 3. Validar body
+	// 2. Validar body
 	var req request.ValidateStockRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
@@ -705,7 +684,7 @@ func (c *OrderController) ValidateStock(ctx *gin.Context) {
 		return
 	}
 
-	// 4. Validar que solo venga 1 item
+	// 3. Validar que solo venga 1 item
 	if len(req.Items) != 1 {
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"error": "Only 1 item is allowed",
@@ -713,8 +692,8 @@ func (c *OrderController) ValidateStock(ctx *gin.Context) {
 		return
 	}
 
-	// 5. Ejecutar use case
-	resp, err := c.validateStockUC.Execute(tenantID, authToken, &req)
+	// 4. Ejecutar use case
+	resp, err := c.validateStockUC.Execute(tenantID, &req)
 	if err != nil {
 		log.Printf("Error validating stock: %v", err)
 		ctx.JSON(http.StatusBadGateway, gin.H{

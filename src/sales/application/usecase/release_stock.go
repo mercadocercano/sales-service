@@ -20,9 +20,9 @@ func NewReleaseStockUseCase(stockClient *client.StockClient) *ReleaseStockUseCas
 }
 
 // Execute ejecuta la liberación de stock
-func (uc *ReleaseStockUseCase) Execute(tenantID, authToken string, req *request.ReleaseStockRequest) (*response.ReleaseStockResponse, error) {
-	// Llamar a stock-service vía Kong
-	stockResp, err := uc.stockClient.ReleaseStock(tenantID, authToken, req.SKU, req.Quantity, req.Reference)
+func (uc *ReleaseStockUseCase) Execute(tenantID string, req *request.ReleaseStockRequest) (*response.ReleaseStockResponse, error) {
+	// Llamar a stock-service vía Kong (S2S)
+	stockResp, err := uc.stockClient.ReleaseStock(tenantID, req.SKU, req.Quantity, req.Reference)
 	if err != nil {
 		// Si es error de stock reservado insuficiente, propagarlo como 409
 		if contains(err.Error(), "insufficient reserved stock") || contains(err.Error(), "409") {

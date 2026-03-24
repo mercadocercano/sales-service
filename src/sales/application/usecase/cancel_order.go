@@ -23,7 +23,7 @@ func NewCancelOrderUseCase(orderRepo port.OrderRepository, stockClient *client.S
 }
 
 // Execute ejecuta la cancelación de la orden (multi-item, atómico)
-func (uc *CancelOrderUseCase) Execute(ctx context.Context, tenantID, authToken, orderID string) (*entity.Order, error) {
+func (uc *CancelOrderUseCase) Execute(ctx context.Context, tenantID, orderID string) (*entity.Order, error) {
 	// 1. Buscar orden con sus items (load aggregate)
 	order, err := uc.orderRepo.FindByID(ctx, orderID, tenantID)
 	if err != nil {
@@ -37,7 +37,7 @@ func (uc *CancelOrderUseCase) Execute(ctx context.Context, tenantID, authToken, 
 
 	// 3. Revertir consumo de stock para CADA item vía Kong
 	for _, item := range order.Items {
-		_, err = uc.stockClient.RevertConsume(tenantID, authToken, item.SKU, item.Quantity, orderID)
+		_, err = uc.stockClient.RevertConsume(tenantID, item.SKU, item.Quantity, orderID)
 		if err != nil {
 			// Si falla un item, TODO el proceso falla
 			return nil, fmt.Errorf("error reverting stock for SKU %s: %w", item.SKU, err)

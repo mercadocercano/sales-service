@@ -22,7 +22,7 @@ func NewReserveStockUseCase(stockClient *client.StockClient) *ReserveStockUseCas
 }
 
 // Execute ejecuta la reserva de stock (multi-item, ALL OR NOTHING)
-func (uc *ReserveStockUseCase) Execute(tenantID, authToken string, req *request.ReserveStockRequest) (*response.ReserveStockResponse, error) {
+func (uc *ReserveStockUseCase) Execute(tenantID string, req *request.ReserveStockRequest) (*response.ReserveStockResponse, error) {
 	var itemsResponse []response.ReserveStockItemResponse
 	var reservedItems []response.ReserveStockItemResponse
 
@@ -31,11 +31,11 @@ func (uc *ReserveStockUseCase) Execute(tenantID, authToken string, req *request.
 		// Generar reference UUID por item
 		reference := uuid.New().String()
 
-		stockResp, err := uc.stockClient.ReserveStock(tenantID, authToken, item.SKU, item.Quantity, reference)
+		stockResp, err := uc.stockClient.ReserveStock(tenantID, item.SKU, item.Quantity, reference)
 		if err != nil {
 			// Si falla un item, liberar los ya reservados (rollback)
 			for _, reservedItem := range reservedItems {
-				_, _ = uc.stockClient.ReleaseStock(tenantID, authToken, reservedItem.SKU, reservedItem.Quantity, reservedItem.Reference)
+				_, _ = uc.stockClient.ReleaseStock(tenantID, reservedItem.SKU, reservedItem.Quantity, reservedItem.Reference)
 			}
 
 			// Propagarcomo 409

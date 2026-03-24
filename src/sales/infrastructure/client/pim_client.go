@@ -41,24 +41,27 @@ type PIMVariantResponse struct {
 	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
-// PIMClient cliente HTTP para comunicarse con PIM service vía Kong
+// PIMClient cliente HTTP para comunicarse con PIM service vía Kong (S2S)
 type PIMClient struct {
 	httpClient *http.Client
 	kongURL    string
 	pimPath    string
+	apiKey     string
 }
 
-// NewPIMClient crea una nueva instancia del cliente PIM
+// NewPIMClient crea una nueva instancia del cliente PIM con autenticación S2S
 func NewPIMClient() *PIMClient {
 	kongURL := os.Getenv("KONG_INTERNAL_URL")
 	if kongURL == "" {
-		kongURL = "http://kong:8000" // Default para entorno Docker
+		kongURL = "http://kong:8000"
 	}
 
 	pimPath := os.Getenv("PIM_SERVICE_PATH")
 	if pimPath == "" {
-		pimPath = "/pim" // Default
+		pimPath = "/internal/pim"
 	}
+
+	apiKey := os.Getenv("S2S_API_KEY")
 
 	return &PIMClient{
 		httpClient: &http.Client{
@@ -66,11 +69,12 @@ func NewPIMClient() *PIMClient {
 		},
 		kongURL: kongURL,
 		pimPath: pimPath,
+		apiKey:  apiKey,
 	}
 }
 
 // GetVariantBySKU obtiene una variante por su SKU
-func (c *PIMClient) GetVariantBySKU(tenantID, authToken, sku string) (*PIMVariantResponse, error) {
+func (c *PIMClient) GetVariantBySKU(tenantID, sku string) (*PIMVariantResponse, error) {
 	// Construir URL completa vía Kong
 	url := fmt.Sprintf("%s%s/api/v1/variants/by-sku/%s", c.kongURL, c.pimPath, sku)
 
@@ -83,9 +87,9 @@ func (c *PIMClient) GetVariantBySKU(tenantID, authToken, sku string) (*PIMVarian
 	// Headers obligatorios
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	// Pasar Authorization si existe
-	if authToken != "" {
-		req.Header.Set("Authorization", authToken)
+	// Autenticación S2S via API Key
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	// Ejecutar request
@@ -119,7 +123,7 @@ func (c *PIMClient) GetVariantBySKU(tenantID, authToken, sku string) (*PIMVarian
 }
 
 // GetProductByID obtiene un producto por su ID
-func (c *PIMClient) GetProductByID(tenantID, authToken, productID string) (*PIMProductResponse, error) {
+func (c *PIMClient) GetProductByID(tenantID, productID string) (*PIMProductResponse, error) {
 	// Construir URL completa vía Kong
 	url := fmt.Sprintf("%s%s/api/v1/products/%s", c.kongURL, c.pimPath, productID)
 
@@ -132,9 +136,9 @@ func (c *PIMClient) GetProductByID(tenantID, authToken, productID string) (*PIMP
 	// Headers obligatorios
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	// Pasar Authorization si existe
-	if authToken != "" {
-		req.Header.Set("Authorization", authToken)
+	// Autenticación S2S via API Key
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	// Ejecutar request
@@ -168,15 +172,15 @@ func (c *PIMClient) GetProductByID(tenantID, authToken, productID string) (*PIMP
 }
 
 // GetSnapshotForSKU obtiene tanto el producto como la variante y retorna ambos como JSON
-func (c *PIMClient) GetSnapshotForSKU(tenantID, authToken, sku string) (productSnapshot, variantSnapshot json.RawMessage, err error) {
+func (c *PIMClient) GetSnapshotForSKU(tenantID, sku string) (productSnapshot, variantSnapshot json.RawMessage, err error) {
 	// 1. Obtener variante por SKU
-	variant, err := c.GetVariantBySKU(tenantID, authToken, sku)
+	variant, err := c.GetVariantBySKU(tenantID, sku)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error fetching variant: %w", err)
 	}
 
 	// 2. Obtener producto asociado
-	product, err := c.GetProductByID(tenantID, authToken, variant.ProductID)
+	product, err := c.GetProductByID(tenantID, variant.ProductID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error fetching product: %w", err)
 	}

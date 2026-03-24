@@ -38,7 +38,7 @@ func NewConfirmOrderUseCase(
 }
 
 // Execute ejecuta la confirmación de la orden (multi-item, atómico)
-func (uc *ConfirmOrderUseCase) Execute(ctx context.Context, tenantID, authToken, orderID, reference string) (*entity.Order, error) {
+func (uc *ConfirmOrderUseCase) Execute(ctx context.Context, tenantID, orderID, reference string) (*entity.Order, error) {
 	// 1. Buscar orden con sus items (load aggregate)
 	order, err := uc.orderRepo.FindByID(ctx, orderID, tenantID)
 	if err != nil {
@@ -52,7 +52,7 @@ func (uc *ConfirmOrderUseCase) Execute(ctx context.Context, tenantID, authToken,
 
 	// 3. Consumir stock reservado para CADA item vía Kong (ALL OR NOTHING)
 	for _, item := range order.Items {
-		_, err = uc.stockClient.ConsumeStock(tenantID, authToken, item.SKU, item.Quantity, reference)
+		_, err = uc.stockClient.ConsumeStock(tenantID, item.SKU, item.Quantity, reference)
 		if err != nil {
 			// Si falla un item, TODO el proceso falla
 			// Nota: En producción debería hacer rollback de items anteriores

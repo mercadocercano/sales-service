@@ -5,24 +5,29 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// CustomerClient valida existencia de clientes en customer-service
+// CustomerClient valida existencia de clientes en customer-service (S2S)
 type CustomerClient struct {
 	baseURL    string
 	httpClient *http.Client
+	apiKey     string
 }
 
-// NewCustomerClient crea una nueva instancia del cliente
+// NewCustomerClient crea una nueva instancia del cliente con autenticación S2S
 func NewCustomerClient(baseURL string) *CustomerClient {
+	apiKey := os.Getenv("S2S_API_KEY")
+
 	return &CustomerClient{
 		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		apiKey: apiKey,
 	}
 }
 
@@ -31,9 +36,9 @@ func NewCustomerClient(baseURL string) *CustomerClient {
 // - true, nil: Cliente existe
 // - false, nil: Cliente no existe (404)
 // - false, error: Error técnico (no se pudo validar)
-func (c *CustomerClient) Exists(ctx context.Context, tenantID uuid.UUID, customerID uuid.UUID, authToken string) (bool, error) {
-	// Construir URL
-	url := fmt.Sprintf("%s/customers/api/v1/customers/%s", c.baseURL, customerID.String())
+func (c *CustomerClient) Exists(ctx context.Context, tenantID uuid.UUID, customerID uuid.UUID) (bool, error) {
+	// Construir URL via ruta interna S2S
+	url := fmt.Sprintf("%s/internal/customers/api/v1/customers/%s", c.baseURL, customerID.String())
 
 	// Crear request
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -43,8 +48,9 @@ func (c *CustomerClient) Exists(ctx context.Context, tenantID uuid.UUID, custome
 
 	// Agregar headers
 	req.Header.Set("X-Tenant-ID", tenantID.String())
-	if authToken != "" {
-		req.Header.Set("Authorization", authToken)
+	// Autenticación S2S via API Key
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	// Ejecutar request
