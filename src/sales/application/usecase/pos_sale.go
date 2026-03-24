@@ -103,7 +103,7 @@ func (uc *POSSaleUseCase) Execute(tenantID, authToken string, req *request.POSSa
 	// HITO v0.6: PASO 1.5 - Validar customer_id contra customer-service
 	// ========================================================================
 	ctx := context.Background()
-	exists, err := uc.customerClient.Exists(ctx, tenantUUID, req.CustomerID)
+	exists, err := uc.customerClient.Exists(ctx, tenantUUID, req.CustomerID, authToken)
 	if err != nil {
 		// Error técnico comunicándose con customer-service
 		return nil, fmt.Errorf("error validating customer: %w", err)

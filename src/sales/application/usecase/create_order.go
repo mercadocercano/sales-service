@@ -60,7 +60,7 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID, authToken s
 		return nil, fmt.Errorf("invalid tenant_id: %w", err)
 	}
 
-	exists, err := uc.customerClient.Exists(ctx, tenantUUID, req.CustomerID)
+	exists, err := uc.customerClient.Exists(ctx, tenantUUID, req.CustomerID, authToken)
 	if err != nil {
 		// Error técnico comunicándose con customer-service
 		return nil, fmt.Errorf("error validating customer: %w", err)

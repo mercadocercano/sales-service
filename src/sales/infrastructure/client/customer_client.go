@@ -31,7 +31,7 @@ func NewCustomerClient(baseURL string) *CustomerClient {
 // - true, nil: Cliente existe
 // - false, nil: Cliente no existe (404)
 // - false, error: Error técnico (no se pudo validar)
-func (c *CustomerClient) Exists(ctx context.Context, tenantID uuid.UUID, customerID uuid.UUID) (bool, error) {
+func (c *CustomerClient) Exists(ctx context.Context, tenantID uuid.UUID, customerID uuid.UUID, authToken string) (bool, error) {
 	// Construir URL
 	url := fmt.Sprintf("%s/customers/api/v1/customers/%s", c.baseURL, customerID.String())
 
@@ -43,6 +43,9 @@ func (c *CustomerClient) Exists(ctx context.Context, tenantID uuid.UUID, custome
 
 	// Agregar headers
 	req.Header.Set("X-Tenant-ID", tenantID.String())
+	if authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+authToken)
+	}
 
 	// Ejecutar request
 	resp, err := c.httpClient.Do(req)
