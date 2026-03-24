@@ -35,7 +35,7 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64
-          "target: production"
+          target: production
           provenance: false
           sbom: false
           build-args: |
@@ -43,7 +43,6 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-
 
       - name: Set up SSH key
         run: |
@@ -71,44 +70,10 @@ jobs:
 
       - name: Verify Pod Ready
         run: |
-          EXPECTED="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          for ATTEMPT in 1 2 3 4 5 6 7 8 9; do
-            echo "Attempt $ATTEMPT/9..."
-            POD_LINE=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@${{ secrets.DROPLET_IP }} \
-              "export KUBECONFIG=/home/deploy/.kube/config && \
-               kubectl get pods -l app=${{ env.DEPLOYMENT_NAME }} -n ${{ env.NAMESPACE }} \
-               -o jsonpath='{range .items[*]}{.spec.containers[0].image} {.status.containerStatuses[0].ready}{\"\\n\"}{end}'" 2>/dev/null) || true
-            echo "$POD_LINE"
-            if echo "$POD_LINE" | grep -q "${EXPECTED} true"; then
-              echo "✅ ${{ env.IMAGE_NAME }} is running and healthy"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "❌ Pod not ready with image ${EXPECTED} after 90s"
-          exit 1
-
-      - name: Cleanup old registry tags
-        if: success()
-        run: |
-          curl -sL https://github.com/digitalocean/doctl/releases/download/v1.104.0/doctl-1.104.0-linux-amd64.tar.gz | tar -xzv
-          sudo mv doctl /usr/local/bin
-          doctl auth init -t ${{ secrets.DOCR_TOKEN }}
-
-          CURRENT_SHA="${{ github.sha }}"
-          KEEP_TAGS="latest $CURRENT_SHA"
-          TAGS_JSON=$(doctl registry repository list-tags ${{ env.IMAGE_NAME }} --registry mc-bootstrap-registry --output json 2>/dev/null || echo "[]")
-          RECENT_SHAS=$(echo "$TAGS_JSON" | jq -r '.[] | select(.tag | test("^[a-f0-9]{40}$")) | "\(.updated_at) \(.tag)"' 2>/dev/null | sort -r | head -2 | awk '{print $2}')
-          for SHA in $RECENT_SHAS; do KEEP_TAGS="$KEEP_TAGS $SHA"; done
-
-          for TAG in $(echo "$TAGS_JSON" | jq -r '.[].tag' 2>/dev/null); do
-            if echo " $KEEP_TAGS " | grep -q " $TAG "; then
-              echo "Keeping tag: $TAG"
-            else
-              echo "Deleting tag: $TAG"
-              doctl registry repository delete-tag ${{ env.IMAGE_NAME }} $TAG --registry mc-bootstrap-registry --force 2>/dev/null || true
-            fi
-          done
-
-          echo "Starting garbage collection..."
-          doctl registry garbage-collection start mc-bootstrap-registry --force --include-untagged-manifests || echo "GC already running, skipping"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@${{ secrets.DROPLET_IP }} \
+            "export KUBECONFIG=/home/deploy/.kube/config && \
+             READY=\$(kubectl get pods -l app=${{ env.DEPLOYMENT_NAME }} -o jsonpath='{.items[0].status.containerStatuses[0].ready}') && \
+             IMAGE=\$(kubectl get pods -l app=${{ env.DEPLOYMENT_NAME }} -o jsonpath='{.items[0].spec.containers[0].image}') && \
+             echo \\"Pod ready: \$READY\\" && echo \\"Image: \$IMAGE\\" && \
+             [ \\"\$READY\\" = 'true' ] || (echo '❌ Pod not ready'; exit 1) && \
+             echo '✅ ${{ env.IMAGE_NAME }} is running and healthy'"
