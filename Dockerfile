@@ -52,6 +52,9 @@ RUN apk add --no-cache \
     && echo "UTC" > /etc/timezone \
     && apk del tzdata
 
+# Install Air for hot reload
+RUN go install github.com/cosmtrek/air@v1.49.0
+
 WORKDIR /app
 
 # Configure private Go modules
@@ -73,14 +76,16 @@ RUN mkdir -p tmp scripts uploads logs /go/pkg/mod && \
 # Copy source code with correct ownership
 COPY --chown=appuser:appgroup . .
 
+# Switch to non-root user
+USER appuser
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 EXPOSE 8080
 
-# Use go run directly (simple fix)
-CMD ["go", "run", "."]
+CMD sh -c 'if [ -n "$GITHUB_TOKEN" ]; then git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; fi && air -c .air.toml'
 
 # ==============================================
 # Stage 4: Migrate stage (Alpine + psql para Job K8s)
