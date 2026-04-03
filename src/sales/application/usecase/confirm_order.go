@@ -6,34 +6,30 @@ import (
 	"fmt"
 	"log"
 	"time"
-	"sales/src/sales/application/service"
 	"sales/src/sales/domain/entity"
 	"sales/src/sales/domain/port"
-	"sales/src/sales/infrastructure/client"
-	
-	"github.com/mercadocercano/eventbus"
 )
 
 // ConfirmOrderUseCase caso de uso para confirmar una orden
 type ConfirmOrderUseCase struct {
-	orderRepo       port.OrderRepository
-	stockClient     *client.StockClient
-	publishUseCase  *eventbus.PublishEventUseCase
-	sequenceService *service.SequenceService
+	orderRepo      port.OrderRepository
+	stockPort      port.StockPort
+	eventPublisher port.EventPublisher
+	sequencePort   port.SequencePort
 }
 
 // NewConfirmOrderUseCase crea una nueva instancia del caso de uso
 func NewConfirmOrderUseCase(
-	orderRepo port.OrderRepository, 
-	stockClient *client.StockClient,
-	publishUseCase *eventbus.PublishEventUseCase,
-	sequenceService *service.SequenceService,
+	orderRepo port.OrderRepository,
+	stockPort port.StockPort,
+	eventPublisher port.EventPublisher,
+	sequencePort port.SequencePort,
 ) *ConfirmOrderUseCase {
 	return &ConfirmOrderUseCase{
-		orderRepo:       orderRepo,
-		stockClient:     stockClient,
-		publishUseCase:  publishUseCase,
-		sequenceService: sequenceService,
+		orderRepo:      orderRepo,
+		stockPort:      stockPort,
+		eventPublisher: eventPublisher,
+		sequencePort:   sequencePort,
 	}
 }
 
@@ -52,7 +48,7 @@ func (uc *ConfirmOrderUseCase) Execute(ctx context.Context, tenantID, orderID, r
 
 	// 3. Consumir stock reservado para CADA item vía Kong (ALL OR NOTHING)
 	for _, item := range order.Items {
-		_, err = uc.stockClient.ConsumeStock(tenantID, item.SKU, item.Quantity, reference)
+		_, err = uc.stockPort.ConsumeStock(tenantID, item.SKU, item.Quantity, reference)
 		if err != nil {
 			// Si falla un item, TODO el proceso falla
 			// Nota: En producción debería hacer rollback de items anteriores
@@ -64,8 +60,8 @@ func (uc *ConfirmOrderUseCase) Execute(ctx context.Context, tenantID, orderID, r
 	}
 
 	// 4. HITO v0.4: Asignar número de orden (con optimistic locking)
-	if uc.sequenceService != nil {
-		orderNumber, err := uc.sequenceService.NextNumber(ctx, tenantID, "SALES_ORDER")
+	if uc.sequencePort != nil {
+		orderNumber, err := uc.sequencePort.NextNumber(ctx, tenantID, "SALES_ORDER")
 		if err != nil {
 			return nil, fmt.Errorf("error assigning order number: %w", err)
 		}
@@ -89,7 +85,7 @@ func (uc *ConfirmOrderUseCase) Execute(ctx context.Context, tenantID, orderID, r
 	order.Status = entity.OrderStatusConfirmed
 
 	// 7. HITO v0.1: Publicar evento sales.order.confirmed
-	if uc.publishUseCase != nil {
+	if uc.eventPublisher != nil {
 		if err := uc.publishSalesOrderConfirmedEvent(ctx, order, tenantID); err != nil {
 			// Log error pero NO fallar la operación (orden ya confirmada)
 			log.Printf("WARNING: Failed to publish sales.order.confirmed: %v", err)
@@ -158,7 +154,7 @@ func (uc *ConfirmOrderUseCase) publishSalesOrderConfirmedEvent(
 	}
 
 	// Publicar usando eventbus
-	return uc.publishUseCase.Execute(
+	return uc.eventPublisher.Execute(
 		ctx,
 		order.OrderID,            // aggregateID
 		"sales_order",            // aggregateType

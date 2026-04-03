@@ -4,25 +4,25 @@ import (
 	"fmt"
 	"sales/src/sales/application/request"
 	"sales/src/sales/application/response"
-	"sales/src/sales/infrastructure/client"
+	"sales/src/sales/domain/port"
 )
 
 // ReleaseStockUseCase caso de uso para liberar stock reservado
 type ReleaseStockUseCase struct {
-	stockClient *client.StockClient
+	stockPort port.StockPort
 }
 
 // NewReleaseStockUseCase crea una nueva instancia del caso de uso
-func NewReleaseStockUseCase(stockClient *client.StockClient) *ReleaseStockUseCase {
+func NewReleaseStockUseCase(stockPort port.StockPort) *ReleaseStockUseCase {
 	return &ReleaseStockUseCase{
-		stockClient: stockClient,
+		stockPort: stockPort,
 	}
 }
 
 // Execute ejecuta la liberación de stock
 func (uc *ReleaseStockUseCase) Execute(tenantID string, req *request.ReleaseStockRequest) (*response.ReleaseStockResponse, error) {
 	// Llamar a stock-service vía Kong (S2S)
-	stockResp, err := uc.stockClient.ReleaseStock(tenantID, req.SKU, req.Quantity, req.Reference)
+	stockResp, err := uc.stockPort.ReleaseStock(tenantID, req.SKU, req.Quantity, req.Reference)
 	if err != nil {
 		// Si es error de stock reservado insuficiente, propagarlo como 409
 		if contains(err.Error(), "insufficient reserved stock") || contains(err.Error(), "409") {

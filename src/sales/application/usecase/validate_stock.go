@@ -4,18 +4,18 @@ import (
 	"fmt"
 	"sales/src/sales/application/request"
 	"sales/src/sales/application/response"
-	"sales/src/sales/infrastructure/client"
+	"sales/src/sales/domain/port"
 )
 
 // ValidateStockUseCase caso de uso para validar stock
 type ValidateStockUseCase struct {
-	stockClient *client.StockClient
+	stockPort port.StockPort
 }
 
 // NewValidateStockUseCase crea una nueva instancia del caso de uso
-func NewValidateStockUseCase(stockClient *client.StockClient) *ValidateStockUseCase {
+func NewValidateStockUseCase(stockPort port.StockPort) *ValidateStockUseCase {
 	return &ValidateStockUseCase{
-		stockClient: stockClient,
+		stockPort: stockPort,
 	}
 }
 
@@ -26,7 +26,7 @@ func (uc *ValidateStockUseCase) Execute(tenantID string, req *request.ValidateSt
 
 	// Validar cada item
 	for _, item := range req.Items {
-		stockResp, hasEnoughStock, err := uc.stockClient.ValidateStock(tenantID, item.SKU, item.Quantity)
+		stockResp, hasEnoughStock, err := uc.stockPort.ValidateStock(tenantID, item.SKU, item.Quantity)
 		if err != nil {
 			return nil, fmt.Errorf("error validating stock for SKU %s: %w", item.SKU, err)
 		}

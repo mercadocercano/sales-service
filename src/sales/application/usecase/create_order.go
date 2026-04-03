@@ -8,7 +8,6 @@ import (
 	"sales/src/sales/application/response"
 	"sales/src/sales/domain/entity"
 	"sales/src/sales/domain/port"
-	"sales/src/sales/infrastructure/client"
 
 	"github.com/google/uuid"
 )
@@ -16,24 +15,24 @@ import (
 // CreateOrderUseCase caso de uso para crear una orden
 // HITO v0.6: Ahora valida customer_id contra customer-service
 type CreateOrderUseCase struct {
-	orderRepo      port.OrderRepository
-	pimClient      *client.PIMClient
-	stockClient    *client.StockClient
-	customerClient *client.CustomerClient
+	orderRepo    port.OrderRepository
+	pimPort      port.PIMPort
+	stockPort    port.StockPort
+	customerPort port.CustomerPort
 }
 
 // NewCreateOrderUseCase crea una nueva instancia del caso de uso
 func NewCreateOrderUseCase(
 	orderRepo port.OrderRepository,
-	pimClient *client.PIMClient,
-	stockClient *client.StockClient,
-	customerClient *client.CustomerClient,
+	pimPort port.PIMPort,
+	stockPort port.StockPort,
+	customerPort port.CustomerPort,
 ) *CreateOrderUseCase {
 	return &CreateOrderUseCase{
-		orderRepo:      orderRepo,
-		pimClient:      pimClient,
-		stockClient:    stockClient,
-		customerClient: customerClient,
+		orderRepo:    orderRepo,
+		pimPort:      pimPort,
+		stockPort:    stockPort,
+		customerPort: customerPort,
 	}
 }
 
@@ -60,7 +59,7 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID string, req 
 		return nil, fmt.Errorf("invalid tenant_id: %w", err)
 	}
 
-	exists, err := uc.customerClient.Exists(ctx, tenantUUID, req.CustomerID)
+	exists, err := uc.customerPort.Exists(ctx, tenantUUID, req.CustomerID)
 	if err != nil {
 		// Error técnico comunicándose con customer-service
 		return nil, fmt.Errorf("error validating customer: %w", err)
@@ -81,7 +80,7 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID string, req 
 		}
 
 		// Intentar obtener snapshots de PIM para trazabilidad (best effort)
-		productSnapshot, variantSnapshot, err := uc.pimClient.GetSnapshotForSKU(tenantID, itemReq.SKU)
+		productSnapshot, variantSnapshot, err := uc.pimPort.GetSnapshotForSKU(tenantID, itemReq.SKU)
 		if err != nil {
 			// PIM falló - loggear pero NO bloquear
 			// Sales es autosuficiente con el unit_price recibido
@@ -115,7 +114,7 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID string, req 
 	processedStockEntries := make([]string, 0, len(order.Items))
 
 	for _, item := range order.Items {
-		saleResp, err := uc.stockClient.ProcessSaleAtomic(
+		saleResp, err := uc.stockPort.ProcessSaleAtomic(
 			tenantID,
 			item.SKU,
 			float64(item.Quantity),
@@ -176,7 +175,7 @@ func (uc *CreateOrderUseCase) compensateProcessedStock(
 	reason string,
 ) {
 	for _, entryID := range stockEntryIDs {
-		err := uc.stockClient.CompensateSale(tenantID, entryID, reason)
+		err := uc.stockPort.CompensateSale(tenantID, entryID, reason)
 		if err != nil {
 			// CRÍTICO: Si falla compensación, log para auditoría manual
 			// No hacer panic ni detener el flujo

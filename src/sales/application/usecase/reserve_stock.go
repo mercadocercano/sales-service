@@ -4,20 +4,20 @@ import (
 	"fmt"
 	"sales/src/sales/application/request"
 	"sales/src/sales/application/response"
-	"sales/src/sales/infrastructure/client"
+	"sales/src/sales/domain/port"
 
 	"github.com/google/uuid"
 )
 
 // ReserveStockUseCase caso de uso para reservar stock
 type ReserveStockUseCase struct {
-	stockClient *client.StockClient
+	stockPort port.StockPort
 }
 
 // NewReserveStockUseCase crea una nueva instancia del caso de uso
-func NewReserveStockUseCase(stockClient *client.StockClient) *ReserveStockUseCase {
+func NewReserveStockUseCase(stockPort port.StockPort) *ReserveStockUseCase {
 	return &ReserveStockUseCase{
-		stockClient: stockClient,
+		stockPort: stockPort,
 	}
 }
 
@@ -31,11 +31,11 @@ func (uc *ReserveStockUseCase) Execute(tenantID string, req *request.ReserveStoc
 		// Generar reference UUID por item
 		reference := uuid.New().String()
 
-		stockResp, err := uc.stockClient.ReserveStock(tenantID, item.SKU, item.Quantity, reference)
+		stockResp, err := uc.stockPort.ReserveStock(tenantID, item.SKU, item.Quantity, reference)
 		if err != nil {
 			// Si falla un item, liberar los ya reservados (rollback)
 			for _, reservedItem := range reservedItems {
-				_, _ = uc.stockClient.ReleaseStock(tenantID, reservedItem.SKU, reservedItem.Quantity, reservedItem.Reference)
+				_, _ = uc.stockPort.ReleaseStock(tenantID, reservedItem.SKU, reservedItem.Quantity, reservedItem.Reference)
 			}
 
 			// Propagarcomo 409

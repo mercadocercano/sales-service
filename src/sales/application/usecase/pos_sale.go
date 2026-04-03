@@ -11,12 +11,9 @@ import (
 	"sales/src/sales/application/response"
 	"sales/src/sales/domain/entity"
 	"sales/src/sales/domain/port"
-	"sales/src/sales/infrastructure/cache"
-	"sales/src/sales/infrastructure/client"
 	"sales/src/sales/infrastructure/metrics"
 
 	"github.com/google/uuid"
-	"github.com/mercadocercano/eventbus"
 	"github.com/shopspring/decimal"
 )
 
@@ -25,33 +22,33 @@ import (
 // HITO v0.6: Ahora valida customer_id contra customer-service
 // H8: TenantClient + tenant_metrics para TTFS (evita duplicado si se borran ventas)
 type POSSaleUseCase struct {
-	stockClient         *client.StockClient
-	posSaleRepo         port.PosSaleRepository
-	tenantMetricsRepo   port.TenantMetricsRepository
-	paymentMethodCache  *cache.PaymentMethodCache
-	publishUseCase      *eventbus.PublishEventUseCase
-	customerClient      *client.CustomerClient
-	tenantClient        *client.TenantClient
+	stockPort          port.StockPort
+	posSaleRepo        port.PosSaleRepository
+	tenantMetricsRepo  port.TenantMetricsRepository
+	paymentMethodPort  port.PaymentMethodPort
+	eventPublisher     port.EventPublisher
+	customerPort       port.CustomerPort
+	tenantPort         port.TenantPort
 }
 
 // NewPOSSaleUseCase crea una nueva instancia del caso de uso
 func NewPOSSaleUseCase(
-	stockClient *client.StockClient,
+	stockPort port.StockPort,
 	posSaleRepo port.PosSaleRepository,
 	tenantMetricsRepo port.TenantMetricsRepository,
-	paymentMethodCache *cache.PaymentMethodCache,
-	publishUseCase *eventbus.PublishEventUseCase,
-	customerClient *client.CustomerClient,
-	tenantClient *client.TenantClient,
+	paymentMethodPort port.PaymentMethodPort,
+	eventPublisher port.EventPublisher,
+	customerPort port.CustomerPort,
+	tenantPort port.TenantPort,
 ) *POSSaleUseCase {
 	return &POSSaleUseCase{
-		stockClient:        stockClient,
-		posSaleRepo:        posSaleRepo,
-		tenantMetricsRepo:  tenantMetricsRepo,
-		paymentMethodCache: paymentMethodCache,
-		publishUseCase:     publishUseCase,
-		customerClient:     customerClient,
-		tenantClient:       tenantClient,
+		stockPort:         stockPort,
+		posSaleRepo:       posSaleRepo,
+		tenantMetricsRepo: tenantMetricsRepo,
+		paymentMethodPort: paymentMethodPort,
+		eventPublisher:    eventPublisher,
+		customerPort:      customerPort,
+		tenantPort:        tenantPort,
 	}
 }
 
@@ -72,8 +69,8 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 	if req.PaymentMethodID == uuid.Nil {
 		return nil, fmt.Errorf("payment_method_id is required")
 	}
-	if uc.paymentMethodCache != nil {
-		if _, exists := uc.paymentMethodCache.Get(req.PaymentMethodID); !exists {
+	if uc.paymentMethodPort != nil {
+		if _, exists := uc.paymentMethodPort.Get(req.PaymentMethodID); !exists {
 			return nil, fmt.Errorf("payment_method_not_found: %s", req.PaymentMethodID)
 		}
 	}
@@ -108,7 +105,7 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 	// HITO v0.6: PASO 1.5 - Validar customer_id contra customer-service
 	// ========================================================================
 	ctx := context.Background()
-	exists, err := uc.customerClient.Exists(ctx, tenantUUID, req.CustomerID)
+	exists, err := uc.customerPort.Exists(ctx, tenantUUID, req.CustomerID)
 	if err != nil {
 		// Error técnico comunicándose con customer-service
 		return nil, fmt.Errorf("error validating customer: %w", err)
@@ -140,7 +137,7 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 		// OPERACIÓN ATÓMICA: validar + descontar en una sola transacción
 		log.Printf("📦 ProcessSaleAtomic for item %d: SKU=%s, Qty=%d", i+1, itemReq.SKU, itemReq.Quantity)
 		
-		saleResp, err := uc.stockClient.ProcessSaleAtomic(
+		saleResp, err := uc.stockPort.ProcessSaleAtomic(
 			tenantID,
 			itemReq.SKU,
 			float64(itemReq.Quantity),
@@ -232,7 +229,7 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 		uc.recordDATIfFirstSaleOfDay(ctx, tenantUUID)
 		
 		// HITO v0.1: Publicar evento sales.pos.confirmed
-		if uc.publishUseCase != nil {
+		if uc.eventPublisher != nil {
 			ctx := context.Background()
 			if err := uc.publishPOSSaleConfirmedEvent(ctx, posSale, tenantID); err != nil {
 				// Log error pero NO fallar la operación (venta ya registrada)
@@ -262,8 +259,8 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 
 	// HITO: Obtener nombre del método de pago desde cache
 	paymentMethodName := "Unknown"
-	if uc.paymentMethodCache != nil {
-		paymentMethodName = uc.paymentMethodCache.GetName(posSale.PaymentMethodID)
+	if uc.paymentMethodPort != nil {
+		paymentMethodName = uc.paymentMethodPort.GetName(posSale.PaymentMethodID)
 	}
 
 	// HITO: Usar UUID completo como sale_number
@@ -323,7 +320,7 @@ func (uc *POSSaleUseCase) publishPOSSaleConfirmedEvent(
 	}
 
 	// Publicar usando eventbus (el envelope lo construye PublishEventUseCase)
-	return uc.publishUseCase.Execute(
+	return uc.eventPublisher.Execute(
 		ctx,
 		posSale.ID.String(),      // aggregateID
 		"pos_sale",               // aggregateType
@@ -336,14 +333,14 @@ func (uc *POSSaleUseCase) publishPOSSaleConfirmedEvent(
 // recordTTFSIfFirstSale registra ttfs_seconds solo cuando es la primera venta real del tenant
 // Usa tenant_metrics (INSERT ON CONFLICT DO NOTHING) para evitar duplicado si se borran ventas
 func (uc *POSSaleUseCase) recordTTFSIfFirstSale(ctx context.Context, tenantID uuid.UUID, firstSaleAt time.Time) {
-	if uc.tenantClient == nil || uc.tenantMetricsRepo == nil {
+	if uc.tenantPort == nil || uc.tenantMetricsRepo == nil {
 		return
 	}
 	inserted, err := uc.tenantMetricsRepo.RecordFirstSaleIfNew(ctx, tenantID, firstSaleAt)
 	if err != nil || !inserted {
 		return
 	}
-	tenant, err := uc.tenantClient.GetTenant(ctx, tenantID)
+	tenant, err := uc.tenantPort.GetTenant(ctx, tenantID)
 	if err != nil {
 		log.Printf("WARNING: TTFS metric skipped (tenant fetch failed): %v", err)
 		return
@@ -376,7 +373,7 @@ func (uc *POSSaleUseCase) compensateProcessedStock(
 	log.Printf("🔄 Compensating %d stock entries. Reason: %s", len(stockEntryIDs), reason)
 
 	for _, entryID := range stockEntryIDs {
-		err := uc.stockClient.CompensateSale(tenantID, entryID, reason)
+		err := uc.stockPort.CompensateSale(tenantID, entryID, reason)
 		if err != nil {
 			// CRÍTICO: Si falla compensación, log para auditoría manual
 			// No hacer panic ni detener el flujo de compensación

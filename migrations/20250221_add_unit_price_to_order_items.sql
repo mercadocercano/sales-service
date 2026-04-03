@@ -7,17 +7,24 @@
 
 BEGIN;
 
--- Add unit_price column
-ALTER TABLE sales_order_items 
-ADD COLUMN unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00;
+-- Add unit_price column (idempotent — 010 ya la crea en instalaciones nuevas)
+ALTER TABLE sales_order_items
+ADD COLUMN IF NOT EXISTS unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00;
 
--- Add check constraint
-ALTER TABLE sales_order_items 
-ADD CONSTRAINT chk_unit_price_positive CHECK (unit_price > 0);
+-- Add check constraint (idempotent)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chk_unit_price_positive'
+    ) THEN
+        ALTER TABLE sales_order_items
+        ADD CONSTRAINT chk_unit_price_positive CHECK (unit_price > 0);
+    END IF;
+END;
+$$;
 
 -- Drop default after backfilling (if needed)
--- For new installations, this is safe
-ALTER TABLE sales_order_items 
+ALTER TABLE sales_order_items
 ALTER COLUMN unit_price DROP DEFAULT;
 
 COMMIT;

@@ -37,3 +37,11 @@ tmp/
 
 # Temp directories
 sales-service-temp/
+
+# Build artifacts
+tmp/
+.cache/
+.config/
+.gitconfig
+*-management/
+.cursorrules

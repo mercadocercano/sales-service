@@ -5,20 +5,19 @@ import (
 	"fmt"
 	"sales/src/sales/domain/entity"
 	"sales/src/sales/domain/port"
-	"sales/src/sales/infrastructure/client"
 )
 
 // CancelOrderUseCase caso de uso para cancelar una orden
 type CancelOrderUseCase struct {
-	orderRepo   port.OrderRepository
-	stockClient *client.StockClient
+	orderRepo port.OrderRepository
+	stockPort port.StockPort
 }
 
 // NewCancelOrderUseCase crea una nueva instancia del caso de uso
-func NewCancelOrderUseCase(orderRepo port.OrderRepository, stockClient *client.StockClient) *CancelOrderUseCase {
+func NewCancelOrderUseCase(orderRepo port.OrderRepository, stockPort port.StockPort) *CancelOrderUseCase {
 	return &CancelOrderUseCase{
-		orderRepo:   orderRepo,
-		stockClient: stockClient,
+		orderRepo: orderRepo,
+		stockPort: stockPort,
 	}
 }
 
@@ -37,7 +36,7 @@ func (uc *CancelOrderUseCase) Execute(ctx context.Context, tenantID, orderID str
 
 	// 3. Revertir consumo de stock para CADA item vía Kong
 	for _, item := range order.Items {
-		_, err = uc.stockClient.RevertConsume(tenantID, item.SKU, item.Quantity, orderID)
+		_, err = uc.stockPort.RevertConsume(tenantID, item.SKU, item.Quantity, orderID)
 		if err != nil {
 			// Si falla un item, TODO el proceso falla
 			return nil, fmt.Errorf("error reverting stock for SKU %s: %w", item.SKU, err)

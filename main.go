@@ -11,6 +11,7 @@ import (
 	salesUseCase "sales/src/sales/application/usecase"
 	salesReports "sales/src/sales/application/usecase/reports"
 	"sales/src/sales/domain/port"
+	salesAdapter "sales/src/sales/infrastructure/adapter"
 	salesCache "sales/src/sales/infrastructure/cache"
 	salesClient "sales/src/sales/infrastructure/client"
 	salesController "sales/src/sales/infrastructure/controller"
@@ -215,19 +216,29 @@ func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 		reportRepo = salesPersistence.NewReportPostgresRepository(db)
 	}
 
+	// Crear adaptadores de puertos
+	stockAdapter := salesAdapter.NewStockAdapter(stockClient)
+	pimAdapter := salesAdapter.NewPIMAdapter(pimClient)
+	customerAdapter := salesAdapter.NewCustomerAdapter(customerClient)
+	tenantAdapter := salesAdapter.NewTenantAdapter(tenantClient)
+	var paymentMethodAdapter port.PaymentMethodPort
+	if pmCache != nil {
+		paymentMethodAdapter = salesAdapter.NewPaymentMethodAdapter(pmCache)
+	}
+
 	// Crear casos de uso
-	validateStockUC := salesUseCase.NewValidateStockUseCase(stockClient)
-	reserveStockUC := salesUseCase.NewReserveStockUseCase(stockClient)
-	releaseStockUC := salesUseCase.NewReleaseStockUseCase(stockClient)
-	
-	// POS Sale UseCase - repo, tenant_metrics (TTFS), cache, eventbus, customer, tenant
+	validateStockUC := salesUseCase.NewValidateStockUseCase(stockAdapter)
+	reserveStockUC := salesUseCase.NewReserveStockUseCase(stockAdapter)
+	releaseStockUC := salesUseCase.NewReleaseStockUseCase(stockAdapter)
+
+	// POS Sale UseCase
 	var posSaleUC *salesUseCase.POSSaleUseCase
 	var listPosSalesUC *salesUseCase.ListPosSalesUseCase
 	if posSaleRepo != nil {
-		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockClient, posSaleRepo, tenantMetricsRepo, pmCache, publishUseCase, customerClient, tenantClient)
+		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockAdapter, posSaleRepo, tenantMetricsRepo, paymentMethodAdapter, publishUseCase, customerAdapter, tenantAdapter)
 		listPosSalesUC = salesUseCase.NewListPosSalesUseCase(posSaleRepo)
 	} else {
-		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockClient, nil, nil, pmCache, publishUseCase, customerClient, tenantClient)
+		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockAdapter, nil, nil, paymentMethodAdapter, publishUseCase, customerAdapter, tenantAdapter)
 	}
 
 	var createOrderUC *salesUseCase.CreateOrderUseCase
@@ -238,29 +249,30 @@ func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 	var getOrderFinancialUC *salesUseCase.GetOrderFinancialUseCase
 	var registerPaymentUC *salesUseCase.RegisterPaymentUseCase
 	if salesRepo != nil {
-		// HITO v0.6: CreateOrderUseCase ahora valida customer_id
-		createOrderUC = salesUseCase.NewCreateOrderUseCase(salesRepo, pimClient, stockClient, customerClient)
-		confirmOrderUC = salesUseCase.NewConfirmOrderUseCase(salesRepo, stockClient, publishUseCase, sequenceService)
-		cancelOrderUC = salesUseCase.NewCancelOrderUseCase(salesRepo, stockClient)
+		createOrderUC = salesUseCase.NewCreateOrderUseCase(salesRepo, pimAdapter, stockAdapter, customerAdapter)
+		confirmOrderUC = salesUseCase.NewConfirmOrderUseCase(salesRepo, stockAdapter, publishUseCase, sequenceService)
+		cancelOrderUC = salesUseCase.NewCancelOrderUseCase(salesRepo, stockAdapter)
 		listOrdersUC = salesUseCase.NewListOrdersUseCase(salesRepo)
 		getOrderUC = salesUseCase.NewGetOrderUseCase(salesRepo)
 		getOrderFinancialUC = salesUseCase.NewGetOrderFinancialUseCase(salesRepo)
-		// HITO Cobranza: RegisterPaymentUseCase
-		registerPaymentUC = salesUseCase.NewRegisterPaymentUseCase(db, publishUseCase)
+		paymentRepo := salesPersistence.NewPaymentPostgresRepository(db)
+		registerPaymentUC = salesUseCase.NewRegisterPaymentUseCase(paymentRepo, publishUseCase)
 	}
 
 	var applyCustomerCreditUC *salesUseCase.ApplyCustomerCreditUseCase
 	var createCustomerCreditUC *salesUseCase.CreateCustomerCreditUseCase
 	if db != nil && publishUseCase != nil {
-		applyCustomerCreditUC = salesUseCase.NewApplyCustomerCreditUseCase(db, publishUseCase)
-		createCustomerCreditUC = salesUseCase.NewCreateCustomerCreditUseCase(db, publishUseCase)
+		creditRepo := salesPersistence.NewCreditPostgresRepository(db)
+		applyCustomerCreditUC = salesUseCase.NewApplyCustomerCreditUseCase(creditRepo, publishUseCase)
+		createCustomerCreditUC = salesUseCase.NewCreateCustomerCreditUseCase(creditRepo, publishUseCase)
 	}
 
 	// Crear controladores
 	salesCtrl := salesController.NewOrderController(validateStockUC, reserveStockUC, releaseStockUC, createOrderUC, confirmOrderUC, cancelOrderUC, listOrdersUC, getOrderUC, getOrderFinancialUC, posSaleUC, listPosSalesUC, registerPaymentUC, applyCustomerCreditUC)
 
 	// HITO C - Report Controller (daily + open-orders + aging + customer-balance)
-	dailyReportUC := salesUseCase.NewDailyReportUseCase(db)
+	dailyReportRepo := salesPersistence.NewDailyReportPostgresRepository(db)
+	dailyReportUC := salesUseCase.NewDailyReportUseCase(dailyReportRepo)
 	var openOrdersReportUC *salesReports.GetOpenOrdersReportUseCase
 	var agingReportUC *salesReports.GetAgingReportUseCase
 	var customerBalanceUC *salesReports.GetCustomerBalanceUseCase
