@@ -95,37 +95,34 @@ jobs:
              echo '✅ sales-service is running and healthy'"
 
 
+
       - name: Collect diagnostics and notify Telegram on failure
         if: failure()
         run: |
-          DIAG=""
+          DIAG="SSH unavailable (pre-deploy failure)"
           if [ -f ~/.ssh/deploy_key ]; then
             DIAG=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
               deploy@${{ secrets.DROPLET_IP }} \
-              "export KUBECONFIG=/home/deploy/.kube/config
-               echo '=== Pod Status ==='
-               kubectl get pods -l app=${{ env.DEPLOYMENT_NAME }} -n ${{ env.NAMESPACE }} 2>/dev/null | tail -5
-               echo '=== Last Events ==='
-               kubectl describe pod -l app=${{ env.DEPLOYMENT_NAME }} -n ${{ env.NAMESPACE }} 2>/dev/null \
-                 | grep -A 8 'Events:' | tail -10
-               echo '=== Pod Logs ==='
-               kubectl logs -l app=${{ env.DEPLOYMENT_NAME }} -n ${{ env.NAMESPACE }} --previous --tail=20 2>/dev/null \
-                 || kubectl logs -l app=${{ env.DEPLOYMENT_NAME }} -n ${{ env.NAMESPACE }} --tail=20 2>/dev/null \
-                 || echo 'no logs'" \
-              2>/dev/null | head -c 2800) || DIAG="SSH unavailable (build/push stage failure)"
+              'export KUBECONFIG=/home/deploy/.kube/config && \
+               echo "=== Pod Status ===" && \
+               kubectl get pods -l app=${{ env.DEPLOYMENT_NAME }} -n ${{ env.NAMESPACE }} 2>/dev/null | tail -5 && \
+               echo "=== Events ===" && \
+               kubectl describe pod -l app=${{ env.DEPLOYMENT_NAME }} -n ${{ env.NAMESPACE }} 2>/dev/null | grep -A8 "Events:" | tail -10 && \
+               echo "=== Logs ===" && \
+               (kubectl logs -l app=${{ env.DEPLOYMENT_NAME }} -n ${{ env.NAMESPACE }} --previous --tail=20 2>/dev/null || \
+                kubectl logs -l app=${{ env.DEPLOYMENT_NAME }} -n ${{ env.NAMESPACE }} --tail=20 2>/dev/null || \
+                echo "no logs")' \
+              2>/dev/null | head -c 2800) || DIAG="SSH failed"
           fi
+          MSG=$(printf '❌ FAILED: ${{ env.IMAGE_NAME }}\nCommit: ${{ github.sha }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\n%s' "$DIAG")
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --data-urlencode text="❌ FAILED: ${{ env.IMAGE_NAME }}
-Commit: ${{ github.sha }}
-Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-${DIAG}"
+            --data-urlencode text="$MSG"
 
       - name: Notify Telegram on success
         if: success()
         run: |
+          MSG=$(printf '✅ DEPLOYED: ${{ env.IMAGE_NAME }}\nCommit: ${{ github.sha }}')
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --data-urlencode text="✅ DEPLOYED: ${{ env.IMAGE_NAME }}
-Commit: ${{ github.sha }}"
+            --data-urlencode text="$MSG"
