@@ -72,17 +72,12 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           DROPLET_IP: ${{ secrets.DROPLET_IP }}
 
-      - name: Patch deployment strategy to Recreate
-        run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@${{ secrets.DROPLET_IP }} \
-            "export KUBECONFIG=/home/deploy/.kube/config && \
-             kubectl patch deployment/${{ env.DEPLOYMENT_NAME }} -n ${{ env.NAMESPACE }} \
-               -p '{\"spec\":{\"strategy\":{\"type\":\"Recreate\"}}}' || true"
-
       - name: Deploy to K8s with rollback
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@${{ secrets.DROPLET_IP }} \
             "export KUBECONFIG=/home/deploy/.kube/config && \
+             kubectl patch deployment/${{ env.DEPLOYMENT_NAME }} -n ${{ env.NAMESPACE }} \
+               --type=merge -p '{\"spec\":{\"strategy\":{\"type\":\"Recreate\",\"rollingUpdate\":null}}}' && \
              kubectl set image deployment/${{ env.DEPLOYMENT_NAME }} \
                ${{ env.CONTAINER_NAME }}=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
                -n ${{ env.NAMESPACE }} && \
