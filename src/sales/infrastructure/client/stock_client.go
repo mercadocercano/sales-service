@@ -655,7 +655,7 @@ type ProcessSaleAtomicResponse struct {
 func (c *StockClient) ProcessSaleAtomic(
 	tenantID, sku string,
 	quantity float64,
-	reference string,
+	reference, authToken string,
 ) (*ProcessSaleAtomicResponse, error) {
 	// Preparar request body
 	reqBody := ProcessSaleAtomicRequest{
@@ -682,8 +682,10 @@ func (c *StockClient) ProcessSaleAtomic(
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	// Autenticación S2S via API Key
-	if c.apiKey != "" {
+	// Autenticación: propagar JWT del usuario o usar API Key S2S
+	if authToken != "" {
+		req.Header.Set("Authorization", authToken)
+	} else if c.apiKey != "" {
 		req.Header.Set("X-API-Key", c.apiKey)
 	}
 
@@ -722,6 +724,7 @@ func (c *StockClient) CompensateSale(
 	tenantID string,
 	stockEntryID string,
 	reason string,
+	authToken string,
 ) error {
 	// Preparar request body
 	reqBody := CompensateSaleRequest{
@@ -747,8 +750,10 @@ func (c *StockClient) CompensateSale(
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", tenantID)
 
-	// Autenticación S2S via API Key
-	if c.apiKey != "" {
+	// Autenticación: propagar JWT del usuario o usar API Key S2S
+	if authToken != "" {
+		req.Header.Set("Authorization", authToken)
+	} else if c.apiKey != "" {
 		req.Header.Set("X-API-Key", c.apiKey)
 	}
 

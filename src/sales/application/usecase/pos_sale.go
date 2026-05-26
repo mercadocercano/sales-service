@@ -60,7 +60,7 @@ func NewPOSSaleUseCase(
 // 4. Crear pos_sale aggregate
 // 5. Persistir pos_sale
 // 6. Si falla persistencia → compensar todo el stock descontado
-func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) (*response.POSSaleResponse, error) {
+func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest, authToken string) (*response.POSSaleResponse, error) {
 	log.Printf("🛒 POS Sale Multi-Item - Items: %d, Tenant: %s", len(req.Items), tenantID)
 
 	// ========================================================================
@@ -144,19 +144,20 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 			itemReq.SKU,
 			float64(itemReq.Quantity),
 			itemReference,
+			authToken,
 		)
 
 		if err != nil {
 			// Error técnico (HTTP, network, etc.)
 			log.Printf("❌ Stock service error for SKU %s: %v", itemReq.SKU, err)
-			uc.compensateProcessedStock(tenantID, processedStockEntries, "pos_sale_creation_failed")
+			uc.compensateProcessedStock(tenantID, processedStockEntries, "pos_sale_creation_failed", authToken)
 			return nil, fmt.Errorf("error processing stock for SKU %s: %w", itemReq.SKU, err)
 		}
 
 		if !saleResp.Success {
 			// Error de negocio (stock insuficiente, no inicializado, etc.)
 			log.Printf("❌ Stock rejected for SKU %s: %s", itemReq.SKU, saleResp.Message)
-			uc.compensateProcessedStock(tenantID, processedStockEntries, "insufficient_stock")
+			uc.compensateProcessedStock(tenantID, processedStockEntries, "insufficient_stock", authToken)
 			return nil, fmt.Errorf("stock rejected for SKU %s: %s", itemReq.SKU, saleResp.Message)
 		}
 
@@ -169,7 +170,7 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 		// Parsear stock_entry_id
 		stockEntryUUID, err := uuid.Parse(saleResp.StockEntryID)
 		if err != nil {
-			uc.compensateProcessedStock(tenantID, processedStockEntries, "invalid_stock_entry_id")
+			uc.compensateProcessedStock(tenantID, processedStockEntries, "invalid_stock_entry_id", authToken)
 			return nil, fmt.Errorf("invalid stock_entry_id from stock-service: %w", err)
 		}
 
@@ -183,7 +184,7 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 			stockEntryUUID,
 		)
 		if err != nil {
-			uc.compensateProcessedStock(tenantID, processedStockEntries, "item_creation_failed")
+			uc.compensateProcessedStock(tenantID, processedStockEntries, "item_creation_failed", authToken)
 			return nil, fmt.Errorf("error creating pos_sale_item: %w", err)
 		}
 
@@ -210,7 +211,7 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 			currency,
 		)
 		if err != nil {
-			uc.compensateProcessedStock(tenantID, processedStockEntries, "aggregate_creation_failed")
+			uc.compensateProcessedStock(tenantID, processedStockEntries, "aggregate_creation_failed", authToken)
 			return nil, fmt.Errorf("error creating pos_sale entity: %w", err)
 		}
 
@@ -223,7 +224,7 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 		if err != nil {
 			// CRÍTICO: Stock ya fue descontado, debemos revertirlo
 			log.Printf("⚠️ CRITICAL: Stock consumed but pos_sale persistence failed: %v", err)
-			uc.compensateProcessedStock(tenantID, processedStockEntries, "pos_sale_persistence_failed")
+			uc.compensateProcessedStock(tenantID, processedStockEntries, "pos_sale_persistence_failed", authToken)
 			return nil, fmt.Errorf("error saving pos_sale (stock compensated): %w", err)
 		}
 
@@ -243,7 +244,7 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 			}
 		}
 	} else {
-		uc.compensateProcessedStock(tenantID, processedStockEntries, "repository_not_available")
+		uc.compensateProcessedStock(tenantID, processedStockEntries, "repository_not_available", authToken)
 		return nil, fmt.Errorf("pos_sale repository not available")
 	}
 
@@ -375,11 +376,12 @@ func (uc *POSSaleUseCase) compensateProcessedStock(
 	tenantID string,
 	stockEntryIDs []string,
 	reason string,
+	authToken string,
 ) {
 	log.Printf("🔄 Compensating %d stock entries. Reason: %s", len(stockEntryIDs), reason)
 
 	for _, entryID := range stockEntryIDs {
-		err := uc.stockPort.CompensateSale(tenantID, entryID, reason)
+		err := uc.stockPort.CompensateSale(tenantID, entryID, reason, authToken)
 		if err != nil {
 			// CRÍTICO: Si falla compensación, log para auditoría manual
 			// No hacer panic ni detener el flujo de compensación

@@ -51,15 +51,15 @@ func (m *MockStockPort) RevertConsume(tenantID, sku string, quantity int, refere
 	return args.Get(0).(*port.StockRevertResult), args.Error(1)
 }
 
-func (m *MockStockPort) ProcessSaleAtomic(tenantID, sku string, quantity float64, reference string) (*port.ProcessSaleAtomicResult, error) {
-	args := m.Called(tenantID, sku, quantity, reference)
+func (m *MockStockPort) ProcessSaleAtomic(tenantID, sku string, quantity float64, reference, authToken string) (*port.ProcessSaleAtomicResult, error) {
+	args := m.Called(tenantID, sku, quantity, reference, authToken)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*port.ProcessSaleAtomicResult), args.Error(1)
 }
 
-func (m *MockStockPort) CompensateSale(tenantID, stockEntryID, reason string) error {
-	args := m.Called(tenantID, stockEntryID, reason)
+func (m *MockStockPort) CompensateSale(tenantID, stockEntryID, reason, authToken string) error {
+	args := m.Called(tenantID, stockEntryID, reason, authToken)
 	return args.Error(0)
 }

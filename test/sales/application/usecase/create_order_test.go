@@ -76,9 +76,9 @@ func TestCreateOrderUseCase_Execute_HappyPath_ReturnsResponse(t *testing.T) {
 	pimPort.On("GetSnapshotForSKU", tenantID, "SKU-002").Return(productSnap, variantSnap, nil)
 
 	// Stock ProcessSaleAtomic succeeds for both items
-	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string")).
+	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(stockSuccessResult("SKU-001", "entry-1"), nil)
-	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-002", mock.AnythingOfType("float64"), mock.AnythingOfType("string")).
+	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-002", mock.AnythingOfType("float64"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(stockSuccessResult("SKU-002", "entry-2"), nil)
 
 	// Save succeeds
@@ -206,7 +206,7 @@ func TestCreateOrderUseCase_Execute_WithPIMFailure_StillCreatesOrder(t *testing.
 		Return(nil, nil, errors.New("pim unavailable"))
 
 	// Stock succeeds
-	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string")).
+	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(stockSuccessResult("SKU-001", "entry-1"), nil)
 
 	// Save succeeds
@@ -245,15 +245,15 @@ func TestCreateOrderUseCase_Execute_WithStockFailOnSecondItem_CompensatesFirst(t
 	pimPort.On("GetSnapshotForSKU", tenantID, "SKU-002").Return(nil, nil, nil)
 
 	// First item succeeds
-	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string")).
+	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(stockSuccessResult("SKU-001", "entry-1"), nil)
 
 	// Second item fails (HTTP/network error)
-	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-002", mock.AnythingOfType("float64"), mock.AnythingOfType("string")).
+	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-002", mock.AnythingOfType("float64"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(nil, errors.New("stock service unavailable"))
 
 	// Compensation for first item
-	stockPort.On("CompensateSale", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	stockPort.On("CompensateSale", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	// Act
 	resp, err := uc.Execute(context.Background(), tenantID, req)
@@ -262,7 +262,7 @@ func TestCreateOrderUseCase_Execute_WithStockFailOnSecondItem_CompensatesFirst(t
 	assert.Nil(t, resp)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "error processing stock for SKU SKU-002")
-	stockPort.AssertCalled(t, "CompensateSale", tenantID, "entry-1", "order_creation_failed")
+	stockPort.AssertCalled(t, "CompensateSale", tenantID, "entry-1", "order_creation_failed", "")
 	stockPort.AssertExpectations(t)
 }
 
@@ -286,18 +286,18 @@ func TestCreateOrderUseCase_Execute_WithStockRejected_CompensatesAndReturnsError
 	pimPort.On("GetSnapshotForSKU", tenantID, "SKU-002").Return(nil, nil, nil)
 
 	// First item succeeds
-	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string")).
+	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(stockSuccessResult("SKU-001", "entry-1"), nil)
 
 	// Second item returns success=false (business rejection)
-	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-002", mock.AnythingOfType("float64"), mock.AnythingOfType("string")).
+	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-002", mock.AnythingOfType("float64"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(&port.ProcessSaleAtomicResult{
 			Success: false,
 			Message: "insufficient stock for SKU-002",
 		}, nil)
 
 	// Compensation
-	stockPort.On("CompensateSale", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	stockPort.On("CompensateSale", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	// Act
 	resp, err := uc.Execute(context.Background(), tenantID, req)
@@ -306,7 +306,7 @@ func TestCreateOrderUseCase_Execute_WithStockRejected_CompensatesAndReturnsError
 	assert.Nil(t, resp)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "stock rejected for SKU SKU-002")
-	stockPort.AssertCalled(t, "CompensateSale", tenantID, "entry-1", "insufficient_stock")
+	stockPort.AssertCalled(t, "CompensateSale", tenantID, "entry-1", "insufficient_stock", "")
 }
 
 func TestCreateOrderUseCase_Execute_WithSaveFailure_CompensatesAllStock(t *testing.T) {
@@ -329,16 +329,16 @@ func TestCreateOrderUseCase_Execute_WithSaveFailure_CompensatesAllStock(t *testi
 	pimPort.On("GetSnapshotForSKU", tenantID, "SKU-002").Return(nil, nil, nil)
 
 	// Both items succeed
-	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string")).
+	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(stockSuccessResult("SKU-001", "entry-1"), nil)
-	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-002", mock.AnythingOfType("float64"), mock.AnythingOfType("string")).
+	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-002", mock.AnythingOfType("float64"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(stockSuccessResult("SKU-002", "entry-2"), nil)
 
 	// Save fails
 	orderRepo.On("Save", mock.Anything, mock.Anything).Return(errors.New("database error"))
 
 	// Compensation for both items
-	stockPort.On("CompensateSale", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	stockPort.On("CompensateSale", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	// Act
 	resp, err := uc.Execute(context.Background(), tenantID, req)
@@ -347,6 +347,6 @@ func TestCreateOrderUseCase_Execute_WithSaveFailure_CompensatesAllStock(t *testi
 	assert.Nil(t, resp)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "error saving order (stock compensated)")
-	stockPort.AssertCalled(t, "CompensateSale", tenantID, "entry-1", "order_persistence_failed")
-	stockPort.AssertCalled(t, "CompensateSale", tenantID, "entry-2", "order_persistence_failed")
+	stockPort.AssertCalled(t, "CompensateSale", tenantID, "entry-1", "order_persistence_failed", "")
+	stockPort.AssertCalled(t, "CompensateSale", tenantID, "entry-2", "order_persistence_failed", "")
 }

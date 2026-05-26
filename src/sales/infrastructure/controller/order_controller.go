@@ -626,7 +626,8 @@ func (c *OrderController) POSSale(ctx *gin.Context) {
 	}
 
 	// 3. Ejecutar use case
-	resp, err := c.posSaleUC.Execute(tenantID, &req)
+	authToken := ctx.GetHeader("Authorization")
+	resp, err := c.posSaleUC.Execute(tenantID, &req, authToken)
 	durationMs := time.Since(start).Milliseconds()
 	metrics.POSSaleLatency.Observe(float64(durationMs))
 

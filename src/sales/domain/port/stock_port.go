@@ -62,6 +62,6 @@ type StockPort interface {
 	ReleaseStock(tenantID, sku string, quantity int, reference string) (*StockReleaseResult, error)
 	ConsumeStock(tenantID, sku string, quantity int, reference string) (*StockConsumeResult, error)
 	RevertConsume(tenantID, sku string, quantity int, reference string) (*StockRevertResult, error)
-	ProcessSaleAtomic(tenantID, sku string, quantity float64, reference string) (*ProcessSaleAtomicResult, error)
-	CompensateSale(tenantID, stockEntryID, reason string) error
+	ProcessSaleAtomic(tenantID, sku string, quantity float64, reference, authToken string) (*ProcessSaleAtomicResult, error)
+	CompensateSale(tenantID, stockEntryID, reason, authToken string) error
 }

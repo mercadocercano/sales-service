@@ -84,8 +84,8 @@ func (a *StockAdapter) RevertConsume(tenantID, sku string, quantity int, referen
 	}, nil
 }
 
-func (a *StockAdapter) ProcessSaleAtomic(tenantID, sku string, quantity float64, reference string) (*port.ProcessSaleAtomicResult, error) {
-	resp, err := a.client.ProcessSaleAtomic(tenantID, sku, quantity, reference)
+func (a *StockAdapter) ProcessSaleAtomic(tenantID, sku string, quantity float64, reference, authToken string) (*port.ProcessSaleAtomicResult, error) {
+	resp, err := a.client.ProcessSaleAtomic(tenantID, sku, quantity, reference, authToken)
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +100,6 @@ func (a *StockAdapter) ProcessSaleAtomic(tenantID, sku string, quantity float64,
 	}, nil
 }
 
-func (a *StockAdapter) CompensateSale(tenantID, stockEntryID, reason string) error {
-	return a.client.CompensateSale(tenantID, stockEntryID, reason)
+func (a *StockAdapter) CompensateSale(tenantID, stockEntryID, reason, authToken string) error {
+	return a.client.CompensateSale(tenantID, stockEntryID, reason, authToken)
 }

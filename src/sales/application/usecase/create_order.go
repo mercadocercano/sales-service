@@ -119,6 +119,7 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, tenantID string, req 
 			item.SKU,
 			float64(item.Quantity),
 			order.OrderID, // Reference para trazabilidad
+			"",            // authToken: no disponible en create_order flow
 		)
 
 		if err != nil {
@@ -175,7 +176,7 @@ func (uc *CreateOrderUseCase) compensateProcessedStock(
 	reason string,
 ) {
 	for _, entryID := range stockEntryIDs {
-		err := uc.stockPort.CompensateSale(tenantID, entryID, reason)
+		err := uc.stockPort.CompensateSale(tenantID, entryID, reason, "")
 		if err != nil {
 			// CRÍTICO: Si falla compensación, log para auditoría manual
 			// No hacer panic ni detener el flujo
