@@ -87,7 +87,7 @@ jobs:
                ${{ env.CONTAINER_NAME }}=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
                -n ${{ env.NAMESPACE }} && \
              kubectl rollout status deployment/${{ env.DEPLOYMENT_NAME }} \
-               -n ${{ env.NAMESPACE }} --timeout=180s || \
+               -n ${{ env.NAMESPACE }} --timeout=300s || \
              (kubectl rollout undo deployment/${{ env.DEPLOYMENT_NAME }} -n ${{ env.NAMESPACE }} && \
               echo 'Rollback triggered' && exit 1)"
 
