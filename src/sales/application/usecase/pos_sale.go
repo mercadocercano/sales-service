@@ -66,13 +66,14 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 	// ========================================================================
 	// PASO 1: VALIDACIONES TÉCNICAS
 	// ========================================================================
-	if req.PaymentMethodID == uuid.Nil {
+	if req.PaymentMethodID == "" {
 		return nil, fmt.Errorf("payment_method_id is required")
 	}
-	if uc.paymentMethodPort != nil {
-		if _, exists := uc.paymentMethodPort.Get(req.PaymentMethodID); !exists {
-			return nil, fmt.Errorf("payment_method_not_found: %s", req.PaymentMethodID)
-		}
+
+	// Resolver payment_method_id: acepta UUID o código ("cash", "efectivo")
+	resolvedPaymentMethodID, err := resolvePaymentMethodID(req.PaymentMethodID, uc.paymentMethodPort)
+	if err != nil {
+		return nil, err
 	}
 	if len(req.Items) == 0 {
 		return nil, fmt.Errorf("at least one item is required")
@@ -102,17 +103,18 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 	}
 
 	// ========================================================================
-	// HITO v0.6: PASO 1.5 - Validar customer_id contra customer-service
+	// PASO 1.5 - Validar customer_id contra customer-service (solo si se provee)
+	// nil = venta anónima (Consumidor Final), se permite sin validación
 	// ========================================================================
 	ctx := context.Background()
-	exists, err := uc.customerPort.Exists(ctx, tenantUUID, req.CustomerID)
-	if err != nil {
-		// Error técnico comunicándose con customer-service
-		return nil, fmt.Errorf("error validating customer: %w", err)
-	}
-	if !exists {
-		// Cliente no existe (404) - Error de dominio
-		return nil, fmt.Errorf("customer_not_found: %s", req.CustomerID.String())
+	if req.CustomerID != nil && *req.CustomerID != uuid.Nil {
+		exists, err := uc.customerPort.Exists(ctx, tenantUUID, *req.CustomerID)
+		if err != nil {
+			return nil, fmt.Errorf("error validating customer: %w", err)
+		}
+		if !exists {
+			return nil, fmt.Errorf("customer_not_found: %s", req.CustomerID.String())
+		}
 	}
 
 	// ========================================================================
@@ -194,10 +196,14 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest) 
 	var posSale *entity.PosSale
 	if uc.posSaleRepo != nil {
 		log.Printf("💾 Creating pos_sale with %d items...", len(posSaleItems))
+		customerID := uuid.Nil
+		if req.CustomerID != nil {
+			customerID = *req.CustomerID
+		}
 		posSale, err = entity.NewPosSale(
 			tenantUUID,
-			req.CustomerID,
-			req.PaymentMethodID,
+			customerID,
+			resolvedPaymentMethodID,
 			posSaleItems,
 			discountAmount,
 			req.AmountPaid,
@@ -383,4 +389,29 @@ func (uc *POSSaleUseCase) compensateProcessedStock(
 			log.Printf("✅ Compensated stock entry: %s", entryID)
 		}
 	}
+}
+
+// resolvePaymentMethodID convierte payment_method_id (UUID o código) a uuid.UUID.
+// Acepta: UUID canónico ("xxxxxxxx-...") o código ("cash", "efectivo").
+func resolvePaymentMethodID(raw string, port port.PaymentMethodPort) (uuid.UUID, error) {
+	// Intentar parsear como UUID primero
+	if id, err := uuid.Parse(raw); err == nil {
+		if port != nil {
+			if _, exists := port.Get(id); !exists {
+				return uuid.Nil, fmt.Errorf("payment_method_not_found: %s", id)
+			}
+		}
+		return id, nil
+	}
+
+	// No es UUID — buscar por código
+	if port == nil {
+		return uuid.Nil, fmt.Errorf("payment_method_not_found: %s", raw)
+	}
+	pm, exists := port.GetByCode(raw)
+	if !exists {
+		return uuid.Nil, fmt.Errorf("payment_method_not_found: %s", raw)
+	}
+	log.Printf("🔄 payment_method_id '%s' resuelto a UUID %s", raw, pm.ID)
+	return pm.ID, nil
 }

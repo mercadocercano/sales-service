@@ -142,16 +142,14 @@ func TestNewPosSale_WithNilTenantID_ReturnsError(t *testing.T) {
 	assert.ErrorIs(t, err, entity.ErrTenantIDRequired)
 }
 
-func TestNewPosSale_WithNilCustomerID_ReturnsError(t *testing.T) {
-	// Arrange
+func TestNewPosSale_WithNilCustomerID_AllowsAnonymousSale(t *testing.T) {
+	// uuid.Nil = Consumidor Final — venta anónima permitida
 	item := mother.RandomPosSaleItem().MustBuild()
 
-	// Act
 	sale, err := entity.NewPosSale(uuid.New(), uuid.Nil, uuid.New(), []entity.PosSaleItem{*item}, decimal.Zero, item.Subtotal, "ARS")
 
-	// Assert
-	assert.Nil(t, sale)
-	assert.ErrorIs(t, err, entity.ErrCustomerIDRequired)
+	require.NoError(t, err)
+	assert.Equal(t, uuid.Nil, sale.CustomerID)
 }
 
 func TestNewPosSale_WithNilPaymentMethodID_ReturnsError(t *testing.T) {

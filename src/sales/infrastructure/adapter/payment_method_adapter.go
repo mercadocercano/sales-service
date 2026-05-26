@@ -29,6 +29,18 @@ func (a *PaymentMethodAdapter) Get(id uuid.UUID) (port.PaymentMethodInfo, bool) 
 	}, true
 }
 
+func (a *PaymentMethodAdapter) GetByCode(code string) (port.PaymentMethodInfo, bool) {
+	pm, ok := a.cache.GetByCode(code)
+	if !ok {
+		return port.PaymentMethodInfo{}, false
+	}
+	return port.PaymentMethodInfo{
+		ID:   pm.ID,
+		Code: pm.Code,
+		Name: pm.Name,
+	}, true
+}
+
 func (a *PaymentMethodAdapter) GetName(id uuid.UUID) string {
 	return a.cache.GetName(id)
 }

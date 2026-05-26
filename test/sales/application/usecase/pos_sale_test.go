@@ -19,10 +19,17 @@ import (
 
 // --- helpers ---
 
+// testPMUUIDStr es el UUID string del payment method usado en tests
+const testPMUUIDStr = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+// testPMUUID es el UUID parseado del payment method usado en tests
+func testPMUUID() uuid.UUID { return uuid.MustParse(testPMUUIDStr) }
+
 func validPOSSaleRequest() *request.POSSaleRequest {
+	customerID := uuid.MustParse("11111111-2222-3333-4444-555555555555")
 	return &request.POSSaleRequest{
-		PaymentMethodID: uuid.MustParse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
-		CustomerID:      uuid.MustParse("11111111-2222-3333-4444-555555555555"),
+		PaymentMethodID: testPMUUIDStr,
+		CustomerID:      &customerID,
 		Items: []request.POSSaleItemRequest{
 			{
 				SKU:       "SKU-001",
@@ -75,9 +82,9 @@ func TestPOSSaleUseCase_Execute_HappyPath_ReturnsResponse(t *testing.T) {
 	tenantUUID := uuid.MustParse(tenantID)
 	stockEntryID := uuid.New().String()
 
-	paymentMethodPort.On("Get", req.PaymentMethodID).
-		Return(port.PaymentMethodInfo{ID: req.PaymentMethodID, Code: "cash", Name: "Efectivo"}, true)
-	customerPort.On("Exists", mock.Anything, tenantUUID, req.CustomerID).
+	paymentMethodPort.On("Get", testPMUUID()).
+		Return(port.PaymentMethodInfo{ID: testPMUUID(), Code: "cash", Name: "Efectivo"}, true)
+	customerPort.On("Exists", mock.Anything, tenantUUID, *req.CustomerID).
 		Return(true, nil)
 	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string")).
 		Return(&port.ProcessSaleAtomicResult{
@@ -93,7 +100,7 @@ func TestPOSSaleUseCase_Execute_HappyPath_ReturnsResponse(t *testing.T) {
 	posSaleRepo.On("CountSalesTodayByTenant", mock.Anything, tenantUUID).Return(1, nil)
 	eventPublisher.On("Execute", mock.Anything, mock.Anything, "pos_sale", "sales.pos.confirmed", mock.Anything, "order-service").
 		Return(nil)
-	paymentMethodPort.On("GetName", req.PaymentMethodID).Return("Efectivo")
+	paymentMethodPort.On("GetName", testPMUUID()).Return("Efectivo")
 
 	// Act
 	resp, err := uc.Execute(tenantID, req)
@@ -105,7 +112,7 @@ func TestPOSSaleUseCase_Execute_HappyPath_ReturnsResponse(t *testing.T) {
 	assert.Equal(t, "SKU-001", resp.Items[0].SKU)
 	assert.Equal(t, 2, resp.Items[0].Quantity)
 	assert.Equal(t, "Efectivo", resp.PaymentMethodName)
-	assert.Equal(t, req.CustomerID, resp.CustomerID)
+	assert.Equal(t, *req.CustomerID, resp.CustomerID)
 	assert.True(t, resp.FinalAmount.Equal(decimal.NewFromFloat(200.00)))
 	stockPort.AssertExpectations(t)
 	posSaleRepo.AssertExpectations(t)
@@ -122,7 +129,7 @@ func TestPOSSaleUseCase_Execute_WithNilPaymentMethodID_ReturnsError(t *testing.T
 	uc := setupPOSSaleUseCase(stockPort, posSaleRepo, paymentMethodPort, eventPublisher, customerPort)
 
 	req := validPOSSaleRequest()
-	req.PaymentMethodID = uuid.Nil
+	req.PaymentMethodID = ""
 
 	// Act
 	resp, err := uc.Execute(posSaleTenantID(), req)
@@ -144,7 +151,7 @@ func TestPOSSaleUseCase_Execute_WithPaymentMethodNotFound_ReturnsError(t *testin
 	uc := setupPOSSaleUseCase(stockPort, posSaleRepo, paymentMethodPort, eventPublisher, customerPort)
 
 	req := validPOSSaleRequest()
-	paymentMethodPort.On("Get", req.PaymentMethodID).
+	paymentMethodPort.On("Get", testPMUUID()).
 		Return(port.PaymentMethodInfo{}, false)
 
 	// Act
@@ -169,8 +176,8 @@ func TestPOSSaleUseCase_Execute_WithEmptyItems_ReturnsError(t *testing.T) {
 	req := validPOSSaleRequest()
 	req.Items = []request.POSSaleItemRequest{}
 
-	paymentMethodPort.On("Get", req.PaymentMethodID).
-		Return(port.PaymentMethodInfo{ID: req.PaymentMethodID, Code: "cash", Name: "Efectivo"}, true)
+	paymentMethodPort.On("Get", testPMUUID()).
+		Return(port.PaymentMethodInfo{ID: testPMUUID(), Code: "cash", Name: "Efectivo"}, true)
 
 	// Act
 	resp, err := uc.Execute(posSaleTenantID(), req)
@@ -194,8 +201,8 @@ func TestPOSSaleUseCase_Execute_WithZeroAmountPaid_ReturnsError(t *testing.T) {
 	req := validPOSSaleRequest()
 	req.AmountPaid = decimal.Zero
 
-	paymentMethodPort.On("Get", req.PaymentMethodID).
-		Return(port.PaymentMethodInfo{ID: req.PaymentMethodID, Code: "cash", Name: "Efectivo"}, true)
+	paymentMethodPort.On("Get", testPMUUID()).
+		Return(port.PaymentMethodInfo{ID: testPMUUID(), Code: "cash", Name: "Efectivo"}, true)
 
 	// Act
 	resp, err := uc.Execute(posSaleTenantID(), req)
@@ -220,9 +227,9 @@ func TestPOSSaleUseCase_Execute_WithCustomerNotFound_ReturnsError(t *testing.T) 
 	tenantID := posSaleTenantID()
 	tenantUUID := uuid.MustParse(tenantID)
 
-	paymentMethodPort.On("Get", req.PaymentMethodID).
-		Return(port.PaymentMethodInfo{ID: req.PaymentMethodID, Code: "cash", Name: "Efectivo"}, true)
-	customerPort.On("Exists", mock.Anything, tenantUUID, req.CustomerID).
+	paymentMethodPort.On("Get", testPMUUID()).
+		Return(port.PaymentMethodInfo{ID: testPMUUID(), Code: "cash", Name: "Efectivo"}, true)
+	customerPort.On("Exists", mock.Anything, tenantUUID, *req.CustomerID).
 		Return(false, nil)
 
 	// Act
@@ -248,9 +255,9 @@ func TestPOSSaleUseCase_Execute_WithStockProcessError_CompensatesAndReturnsError
 	tenantID := posSaleTenantID()
 	tenantUUID := uuid.MustParse(tenantID)
 
-	paymentMethodPort.On("Get", req.PaymentMethodID).
-		Return(port.PaymentMethodInfo{ID: req.PaymentMethodID, Code: "cash", Name: "Efectivo"}, true)
-	customerPort.On("Exists", mock.Anything, tenantUUID, req.CustomerID).
+	paymentMethodPort.On("Get", testPMUUID()).
+		Return(port.PaymentMethodInfo{ID: testPMUUID(), Code: "cash", Name: "Efectivo"}, true)
+	customerPort.On("Exists", mock.Anything, tenantUUID, *req.CustomerID).
 		Return(true, nil)
 	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string")).
 		Return(nil, errors.New("stock-service unavailable"))
@@ -265,6 +272,49 @@ func TestPOSSaleUseCase_Execute_WithStockProcessError_CompensatesAndReturnsError
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "error processing stock for SKU SKU-001")
 	stockPort.AssertExpectations(t)
+}
+
+func TestPOSSaleUseCase_Execute_WithNilCustomerID_AnonymousSaleSucceeds(t *testing.T) {
+	// Consumidor Final: customer_id = nil → no valida contra customer-service
+	stockPort := new(mocks.MockStockPort)
+	posSaleRepo := new(mockRepo.MockPosSaleRepository)
+	paymentMethodPort := new(mocks.MockPaymentMethodPort)
+	eventPublisher := new(mocks.MockEventPublisher)
+	customerPort := new(mocks.MockCustomerPort)
+
+	uc := setupPOSSaleUseCase(stockPort, posSaleRepo, paymentMethodPort, eventPublisher, customerPort)
+
+	req := validPOSSaleRequest()
+	req.CustomerID = nil // anónimo
+	tenantID := posSaleTenantID()
+	tenantUUID := uuid.MustParse(tenantID)
+	stockEntryID := uuid.New().String()
+
+	paymentMethodPort.On("Get", testPMUUID()).
+		Return(port.PaymentMethodInfo{ID: testPMUUID(), Code: "cash", Name: "Efectivo"}, true)
+	// customerPort.Exists NO debe ser llamado para ventas anónimas
+	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string")).
+		Return(&port.ProcessSaleAtomicResult{
+			Success:        true,
+			Message:        "ok",
+			VariantSKU:     "SKU-001",
+			QuantitySold:   2,
+			RemainingStock: 8,
+			TotalQuantity:  10,
+			StockEntryID:   stockEntryID,
+		}, nil)
+	posSaleRepo.On("Create", mock.Anything, mock.Anything).Return(nil)
+	posSaleRepo.On("CountSalesTodayByTenant", mock.Anything, tenantUUID).Return(1, nil)
+	eventPublisher.On("Execute", mock.Anything, mock.Anything, "pos_sale", "sales.pos.confirmed", mock.Anything, "order-service").
+		Return(nil)
+	paymentMethodPort.On("GetName", testPMUUID()).Return("Efectivo")
+
+	resp, err := uc.Execute(tenantID, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, uuid.Nil, resp.CustomerID) // Consumidor Final
+	customerPort.AssertNotCalled(t, "Exists")
 }
 
 func TestPOSSaleUseCase_Execute_WithPersistenceError_CompensatesAndReturnsError(t *testing.T) {
@@ -282,9 +332,9 @@ func TestPOSSaleUseCase_Execute_WithPersistenceError_CompensatesAndReturnsError(
 	tenantUUID := uuid.MustParse(tenantID)
 	stockEntryID := uuid.New().String()
 
-	paymentMethodPort.On("Get", req.PaymentMethodID).
-		Return(port.PaymentMethodInfo{ID: req.PaymentMethodID, Code: "cash", Name: "Efectivo"}, true)
-	customerPort.On("Exists", mock.Anything, tenantUUID, req.CustomerID).
+	paymentMethodPort.On("Get", testPMUUID()).
+		Return(port.PaymentMethodInfo{ID: testPMUUID(), Code: "cash", Name: "Efectivo"}, true)
+	customerPort.On("Exists", mock.Anything, tenantUUID, *req.CustomerID).
 		Return(true, nil)
 	stockPort.On("ProcessSaleAtomic", tenantID, "SKU-001", mock.AnythingOfType("float64"), mock.AnythingOfType("string")).
 		Return(&port.ProcessSaleAtomicResult{

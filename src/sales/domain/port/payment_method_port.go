@@ -12,5 +12,6 @@ type PaymentMethodInfo struct {
 // PaymentMethodPort define las operaciones de consulta de métodos de pago
 type PaymentMethodPort interface {
 	Get(id uuid.UUID) (PaymentMethodInfo, bool)
+	GetByCode(code string) (PaymentMethodInfo, bool)
 	GetName(id uuid.UUID) string
 }

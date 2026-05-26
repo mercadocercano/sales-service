@@ -3,6 +3,7 @@ package cache
 import (
 	"database/sql"
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -78,6 +79,19 @@ func (c *PaymentMethodCache) Get(id uuid.UUID) (PaymentMethod, bool) {
 	
 	pm, ok := c.methods[id]
 	return pm, ok
+}
+
+// GetByCode busca un método de pago por código (ej: "cash", "efectivo")
+func (c *PaymentMethodCache) GetByCode(code string) (PaymentMethod, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for _, pm := range c.methods {
+		if strings.EqualFold(pm.Code, code) {
+			return pm, true
+		}
+	}
+	return PaymentMethod{}, false
 }
 
 // GetName obtiene solo el nombre de un método de pago por ID

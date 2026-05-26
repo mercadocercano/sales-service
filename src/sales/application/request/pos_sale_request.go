@@ -10,18 +10,18 @@ import (
 type POSSaleItemRequest struct {
 	SKU       string          `json:"sku" binding:"required"`
 	Quantity  int             `json:"quantity" binding:"required,gt=0"`
-	UnitPrice decimal.Decimal `json:"unit_price" binding:"required"` // Precio unitario
+	UnitPrice decimal.Decimal `json:"unit_price" binding:"required"`
 }
 
 // POSSaleRequest request para venta directa POS multi-item
-// HITO B - Refactorizado para multi-item + descuentos
-// HITO v0.6: customer_id ahora es OBLIGATORIO (validado contra customer-service)
+// customer_id es OPCIONAL — nil = venta anónima (Consumidor Final)
+// payment_method_id acepta UUID ("uuid-...") o código ("cash", "efectivo")
 type POSSaleRequest struct {
-	CustomerID      uuid.UUID            `json:"customer_id" binding:"required"`      // HITO v0.6: Obligatorio
-	Items           []POSSaleItemRequest `json:"items" binding:"required,min=1,dive"` // Mínimo 1 item
-	PaymentMethodID uuid.UUID            `json:"payment_method_id" binding:"required"`
-	DiscountAmount  decimal.Decimal      `json:"discount_amount,omitempty"` // Descuento fijo (default: 0)
-	AmountPaid      decimal.Decimal      `json:"amount_paid" binding:"required"`      // Monto pagado por el cliente
-	Currency        string               `json:"currency,omitempty"`                  // Default: "ARS"
+	CustomerID      *uuid.UUID           `json:"customer_id,omitempty"`
+	Items           []POSSaleItemRequest `json:"items" binding:"required,min=1,dive"`
+	PaymentMethodID string               `json:"payment_method_id" binding:"required"` // UUID o código
+	DiscountAmount  decimal.Decimal      `json:"discount_amount,omitempty"`
+	AmountPaid      decimal.Decimal      `json:"amount_paid" binding:"required"`
+	Currency        string               `json:"currency,omitempty"`
 	Notes           string               `json:"notes,omitempty"`
 }
