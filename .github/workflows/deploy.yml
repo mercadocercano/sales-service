@@ -3,6 +3,7 @@ name: Deploy sales-service to Production
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 env:
   REGISTRY: registry.digitalocean.com/mc-bootstrap-registry
