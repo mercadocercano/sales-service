@@ -230,6 +230,16 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest, 
 
 		log.Printf("✅ PosSale created: ID=%s, Items=%d, FinalAmount=%s", posSale.ID, posSale.TotalItems(), posSale.FinalAmount)
 
+		// S001: métricas de negocio para metrics-gateway KPIs
+		paymentMethodName := "unknown"
+		if uc.paymentMethodPort != nil {
+			paymentMethodName = uc.paymentMethodPort.GetName(posSale.PaymentMethodID)
+		}
+		for _, item := range posSale.Items {
+			metrics.MCSalesTotal.WithLabelValues(tenantID, paymentMethodName, item.SKU).Add(float64(item.Quantity))
+		}
+		metrics.MCSalesAmountTotal.WithLabelValues(tenantID).Add(posSale.FinalAmount.InexactFloat64())
+
 		// H8 TTFS: tenant_metrics evita duplicado si se borran ventas
 		uc.recordTTFSIfFirstSale(ctx, tenantUUID, posSale.CreatedAt)
 		// H8 DAT: primera venta del día por tenant

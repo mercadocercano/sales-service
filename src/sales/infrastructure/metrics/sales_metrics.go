@@ -72,6 +72,26 @@ var (
 			Help: "Incremented when a tenant makes their first sale of the day",
 		},
 	)
+
+	// MCSalesTotal cuenta ventas POS exitosas por tenant y método de pago.
+	// Usado por metrics-gateway para KPIs: top-products, sales-by-hour, payment-methods.
+	MCSalesTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "mc_sales_total",
+			Help: "Total successful POS sales by tenant",
+		},
+		[]string{"tenant_id", "payment_method", "sku"},
+	)
+
+	// MCSalesAmountTotal acumula el monto vendido (ARS) por tenant.
+	// Usado por metrics-gateway para KPIs: daily-revenue, weekly-revenue.
+	MCSalesAmountTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "mc_sales_amount_total",
+			Help: "Total sales amount in ARS by tenant",
+		},
+		[]string{"tenant_id"},
+	)
 )
 
 func init() {
@@ -84,5 +104,7 @@ func init() {
 		QuickstartStartedTotal,
 		QuickstartCompletedTotal,
 		DailyActiveTenantsTotal,
+		MCSalesTotal,
+		MCSalesAmountTotal,
 	)
 }
