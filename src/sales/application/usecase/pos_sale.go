@@ -299,6 +299,7 @@ func (uc *POSSaleUseCase) publishPOSSaleConfirmedEvent(
 ) error {
 	// Construir payload según contrato v1 (SOLO el payload, sin envelope)
 	payload := map[string]interface{}{
+		"tenant_id":  tenantID,
 		"pos_number": 0, // TODO: Implementar numeración secuencial
 		"customer": map[string]interface{}{
 			"customer_id":   "00000000-0000-0000-0000-000000000001", // TODO: Obtener customer_id real
