@@ -42,7 +42,7 @@ func NewPosSale(
 		return nil, ErrTenantIDRequired
 	}
 	if paymentMethodID == uuid.Nil {
-		return nil, ErrTenantIDRequired // TODO: Crear ErrPaymentMethodRequired
+		return nil, ErrPaymentMethodRequired
 	}
 	if len(items) == 0 {
 		return nil, ErrPosSaleMustHaveItems
