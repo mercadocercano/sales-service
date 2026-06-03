@@ -1,0 +1,1521 @@
+openapi: 3.1.0
+info:
+  title: Sales Service API
+  description: |
+    Microservicio de ventas para Mercado Cercano.
+    Gestiona ordenes de venta, ventas POS directas, cobranzas, creditos a cuenta y reportes operativos.
+    Publica eventos de dominio al EventBus (PostgreSQL) para consumo por ledger y otros servicios.
+  version: 0.5.0
+  contact:
+    name: Mercado Cercano
+servers:
+  - url: http://localhost:8120/api/v1
+    description: Desarrollo local (puerto Docker)
+  - url: http://localhost:8001/sales/api/v1
+    description: Via Kong Gateway
+
+security:
+  - bearerAuth: []
+    tenantId: []
+
+tags:
+  - name: Health
+    description: Health check y metadata del servicio
+  - name: Orders
+    description: Ordenes de venta (crear, confirmar, cancelar, listar)
+  - name: Stock Operations
+    description: Validacion, reserva y liberacion de stock para ordenes
+  - name: Payments
+    description: Registro de pagos y aplicacion de creditos a ordenes
+  - name: POS
+    description: Ventas directas POS (punto de venta)
+  - name: Customer Credits
+    description: Creditos a cuenta de clientes
+  - name: Reports
+    description: Reportes diarios, ordenes abiertas, aging y balance por cliente
+  - name: Internal
+    description: Endpoints internos (metricas)
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check del servicio
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Estado del servicio
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /info:
+    get:
+      tags: [Health]
+      summary: Informacion del servicio
+      operationId: getInfo
+      security: []
+      responses:
+        "200":
+          description: Metadata del servicio
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service:
+                    type: string
+                    example: Sales Management Service
+                  version:
+                    type: string
+                    example: 0.5.0
+                  description:
+                    type: string
+
+  # ──────────────────────────────────────────────
+  # Orders
+  # ──────────────────────────────────────────────
+  /sales/orders:
+    get:
+      tags: [Orders]
+      summary: Listar ordenes con paginacion
+      operationId: listOrders
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+        - name: status
+          in: query
+          description: "Filtrar por estado: CREATED, CONFIRMED, PAID, CANCELED"
+          schema:
+            type: string
+            enum: [CREATED, CONFIRMED, PAID, CANCELED]
+        - name: financial_status
+          in: query
+          description: "Filtro financiero (tiene prioridad sobre status): OPEN (remaining > 0), PAID (remaining == 0)"
+          schema:
+            type: string
+            enum: [OPEN, PAID]
+      responses:
+        "200":
+          description: Lista paginada de ordenes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListOrdersResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    post:
+      tags: [Orders]
+      summary: Crear una orden de venta
+      operationId: createOrder
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      responses:
+        "201":
+          description: Orden creada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateOrderResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Cliente no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /sales/orders/{order_id}:
+    get:
+      tags: [Orders]
+      summary: Obtener una orden por ID
+      operationId: getOrder
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          description: Detalle de la orden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetOrderResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Orden no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /sales/orders/{order_id}/confirm:
+    post:
+      tags: [Orders]
+      summary: Confirmar una orden (cambia estado de CREATED a CONFIRMED)
+      operationId: confirmOrder
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+        - $ref: "#/components/parameters/OrderID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmOrderRequest"
+      responses:
+        "200":
+          description: Orden confirmada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Orden no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Orden no esta en estado CREATED o stock reservado insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /sales/orders/{order_id}/cancel:
+    post:
+      tags: [Orders]
+      summary: Cancelar una orden confirmada (cambia estado de CONFIRMED a CANCELED)
+      operationId: cancelOrder
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          description: Orden cancelada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Orden no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Orden no esta en estado CONFIRMED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Error comunicandose con stock-service
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetailResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /sales/orders/{order_id}/financial:
+    get:
+      tags: [Orders]
+      summary: Obtener resumen financiero de una orden (total, pagado, restante)
+      operationId: getOrderFinancial
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          description: Resumen financiero de la orden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderFinancialResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Orden no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ──────────────────────────────────────────────
+  # Payments
+  # ──────────────────────────────────────────────
+  /sales/orders/{order_id}/payments:
+    post:
+      tags: [Payments]
+      summary: Registrar un pago contra una orden confirmada
+      operationId: registerPayment
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+        - $ref: "#/components/parameters/OrderID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterPaymentRequest"
+      responses:
+        "201":
+          description: Pago registrado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterPaymentResponse"
+        "400":
+          description: Monto invalido o pago excede el total de la orden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetailResponse"
+        "404":
+          description: Orden no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Orden debe estar confirmada antes de aceptar pagos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /sales/orders/{order_id}/apply-credit:
+    post:
+      tags: [Payments]
+      summary: Aplicar un credito de cliente a una orden
+      operationId: applyCustomerCredit
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+        - $ref: "#/components/parameters/OrderID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyCreditRequest"
+      responses:
+        "201":
+          description: Credito aplicado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyCreditResponse"
+        "400":
+          description: Error de validacion (orden en estado invalido, credito agotado, monto insuficiente, cliente distinto)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Orden o credito no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ──────────────────────────────────────────────
+  # Stock Operations
+  # ──────────────────────────────────────────────
+  /sales/orders/validate-stock:
+    post:
+      tags: [Stock Operations]
+      summary: Validar disponibilidad de stock para un item
+      description: Solo acepta 1 item por request.
+      operationId: validateStock
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateStockRequest"
+      responses:
+        "200":
+          description: Resultado de la validacion de stock
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidateStockResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "502":
+          description: Error comunicandose con stock-service
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetailResponse"
+
+  /sales/orders/reserve-stock:
+    post:
+      tags: [Stock Operations]
+      summary: Reservar stock para items de una orden
+      operationId: reserveStock
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReserveStockRequest"
+      responses:
+        "200":
+          description: Stock reservado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReserveStockResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Stock insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Error comunicandose con stock-service
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetailResponse"
+
+  /sales/orders/release-stock:
+    post:
+      tags: [Stock Operations]
+      summary: Liberar stock previamente reservado
+      operationId: releaseStock
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReleaseStockRequest"
+      responses:
+        "200":
+          description: Stock liberado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseStockResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Stock reservado insuficiente para liberar
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Error comunicandose con stock-service
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetailResponse"
+
+  # ──────────────────────────────────────────────
+  # POS
+  # ──────────────────────────────────────────────
+  /sales/pos:
+    post:
+      tags: [POS]
+      summary: Registrar venta directa POS (sin crear orden)
+      operationId: createPosSale
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/POSSaleRequest"
+      responses:
+        "201":
+          description: Venta POS registrada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/POSSaleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Cliente no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Stock insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Error procesando la venta POS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetailResponse"
+
+    get:
+      tags: [POS]
+      summary: Listar ventas POS del tenant
+      operationId: listPosSales
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+      responses:
+        "200":
+          description: Lista de ventas POS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListPosSalesResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ──────────────────────────────────────────────
+  # Customer Credits
+  # ──────────────────────────────────────────────
+  /sales/customers/{customer_id}/credits:
+    post:
+      tags: [Customer Credits]
+      summary: Crear credito a cuenta para un cliente
+      operationId: createCustomerCredit
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+        - name: customer_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: ID del cliente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCustomerCreditRequest"
+      responses:
+        "201":
+          description: Credito creado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateCustomerCreditResponse"
+        "400":
+          description: Monto invalido (debe ser mayor a cero)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ──────────────────────────────────────────────
+  # Reports
+  # ──────────────────────────────────────────────
+  /reports/daily:
+    get:
+      tags: [Reports]
+      summary: Reporte diario de ventas
+      operationId: getDailyReport
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+        - name: date
+          in: query
+          required: true
+          description: Fecha del reporte (formato YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: "2026-04-18"
+      responses:
+        "200":
+          description: Reporte diario
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyReportResponse"
+        "400":
+          description: Fecha faltante o formato invalido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetailResponse"
+
+  /sales/reports/open-orders:
+    get:
+      tags: [Reports]
+      summary: Reporte de ordenes abiertas (outstanding)
+      operationId: getOpenOrdersReport
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 100
+        - name: aging_bucket
+          in: query
+          description: Filtrar por bucket de aging
+          schema:
+            type: string
+            enum: ["0_30", "31_60", "61_90", "90_plus"]
+        - name: customer_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: sort
+          in: query
+          description: Orden de resultados
+          schema:
+            type: string
+            enum: [remaining_desc, remaining_asc, days_desc, days_asc]
+            default: remaining_desc
+      responses:
+        "200":
+          description: Reporte de ordenes abiertas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenOrdersReportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /sales/reports/aging:
+    get:
+      tags: [Reports]
+      summary: Reporte de aging por cliente (cuentas por cobrar)
+      operationId: getAgingReport
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+      responses:
+        "200":
+          description: Reporte de aging
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgingReportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /sales/reports/customer-balance:
+    get:
+      tags: [Reports]
+      summary: Ficha financiera de un cliente (balance, aging, ordenes abiertas)
+      operationId: getCustomerBalanceReport
+      parameters:
+        - $ref: "#/components/parameters/XTenantID"
+        - name: customer_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: aging_bucket
+          in: query
+          schema:
+            type: string
+            enum: ["0_30", "31_60", "61_90", "90_plus"]
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [remaining_desc, remaining_asc, days_desc, days_asc]
+      responses:
+        "200":
+          description: Balance del cliente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerBalanceResponse"
+        "400":
+          description: customer_id requerido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ──────────────────────────────────────────────
+  # Internal Metrics
+  # ──────────────────────────────────────────────
+  /sales/internal/metrics/event:
+    post:
+      tags: [Internal]
+      summary: Registrar evento de metricas (uso interno)
+      description: |
+        Endpoint interno para registrar eventos de metricas desde el frontend.
+        Protegido opcionalmente con X-Metrics-Key si METRICS_EVENT_SECRET esta configurado.
+      operationId: recordMetricsEvent
+      parameters:
+        - name: X-Metrics-Key
+          in: header
+          description: Clave de autenticacion interna (requerida si METRICS_EVENT_SECRET esta configurado)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MetricsEventRequest"
+      responses:
+        "200":
+          description: Evento registrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "400":
+          description: Evento requerido o desconocido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Clave de metricas invalida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT obtenido de iam-service
+    tenantId:
+      type: apiKey
+      in: header
+      name: X-Tenant-ID
+      description: UUID del tenant (obligatorio en todas las rutas autenticadas)
+
+  parameters:
+    XTenantID:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      description: UUID del tenant
+      schema:
+        type: string
+        format: uuid
+
+    OrderID:
+      name: order_id
+      in: path
+      required: true
+      description: ID de la orden
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Request invalido
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    ServiceUnavailable:
+      description: Servicio no disponible (base de datos no configurada)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    # ── Health ──
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, error]
+        service:
+          type: string
+          example: sales
+        version:
+          type: string
+          example: 0.5.0-routes-alignment
+        database:
+          type: string
+          example: ok
+
+    # ── Error ──
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+
+    ErrorDetailResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+
+    # ── Orders ──
+    CreateOrderRequest:
+      type: object
+      required: [customer_id, items]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+          description: ID del cliente (obligatorio, validado contra customer-service)
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/CreateOrderItemRequest"
+        reference:
+          type: string
+          description: Referencia opcional de la orden
+
+    CreateOrderItemRequest:
+      type: object
+      required: [sku, quantity, unit_price]
+      properties:
+        sku:
+          type: string
+          example: SKU-001
+        quantity:
+          type: integer
+          minimum: 1
+        unit_price:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+
+    CreateOrderResponse:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              item_id:
+                type: string
+                format: uuid
+              sku:
+                type: string
+              quantity:
+                type: integer
+        total_items:
+          type: integer
+        status:
+          type: string
+          enum: [CREATED]
+
+    ConfirmOrderRequest:
+      type: object
+      required: [reference]
+      properties:
+        reference:
+          type: string
+          description: Referencia de confirmacion
+
+    OrderStatusResponse:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [CREATED, CONFIRMED, PAID, CANCELED]
+
+    GetOrderResponse:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [CREATED, CONFIRMED, PAID, CANCELED]
+        created_at:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItemResponse"
+
+    OrderItemResponse:
+      type: object
+      properties:
+        item_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        quantity:
+          type: integer
+        product_snapshot:
+          description: Snapshot inmutable del producto al momento de la orden
+        variant_snapshot:
+          description: Snapshot inmutable de la variante al momento de la orden
+
+    ListOrdersResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderListItem"
+        total_count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total_pages:
+          type: integer
+
+    OrderListItem:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [CREATED, CONFIRMED, PAID, CANCELED]
+        created_at:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItemResponse"
+
+    OrderFinancialResponse:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        total_amount:
+          type: number
+          format: double
+          description: Monto total de la orden
+        total_paid:
+          type: number
+          format: double
+          description: Total pagado hasta ahora
+        remaining:
+          type: number
+          format: double
+          description: Monto restante por pagar
+        status:
+          type: string
+          enum: [CREATED, CONFIRMED, PAID, CANCELED]
+        payment_count:
+          type: integer
+          description: Cantidad de pagos registrados
+        last_payment_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Fecha del ultimo pago (RFC3339)
+
+    # ── Payments ──
+    RegisterPaymentRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+          description: Monto del pago
+
+    RegisterPaymentResponse:
+      type: object
+      properties:
+        payment_id:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: double
+        currency:
+          type: string
+          example: ARS
+
+    ApplyCreditRequest:
+      type: object
+      required: [customer_credit_id, amount]
+      properties:
+        customer_credit_id:
+          type: string
+          format: uuid
+          description: ID del credito a cuenta del cliente
+        amount:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+          description: Monto a aplicar del credito
+
+    ApplyCreditResponse:
+      type: object
+      properties:
+        application_id:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: double
+
+    # ── Stock Operations ──
+    ValidateStockRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 1
+          description: Solo 1 item permitido por request
+          items:
+            type: object
+            required: [sku, quantity]
+            properties:
+              sku:
+                type: string
+              quantity:
+                type: integer
+                minimum: 1
+
+    ValidateStockResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+          description: true si todos los items tienen stock disponible
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              sku:
+                type: string
+              requested_qty:
+                type: integer
+              available:
+                type: boolean
+              available_qty:
+                type: integer
+
+    ReserveStockRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [sku, quantity]
+            properties:
+              sku:
+                type: string
+              quantity:
+                type: integer
+                minimum: 1
+
+    ReserveStockResponse:
+      type: object
+      properties:
+        reserved:
+          type: boolean
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              sku:
+                type: string
+              quantity:
+                type: integer
+              reference:
+                type: string
+
+    ReleaseStockRequest:
+      type: object
+      required: [sku, quantity, reference]
+      properties:
+        sku:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        reference:
+          type: string
+          description: Referencia de la reserva original
+
+    ReleaseStockResponse:
+      type: object
+      properties:
+        released:
+          type: boolean
+        sku:
+          type: string
+        quantity:
+          type: integer
+        reference:
+          type: string
+
+    # ── POS ──
+    POSSaleRequest:
+      type: object
+      required: [customer_id, items, payment_method_id, amount_paid]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+          description: ID del cliente (obligatorio)
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/POSSaleItemRequest"
+        payment_method_id:
+          type: string
+          format: uuid
+          description: ID del metodo de pago
+        discount_amount:
+          type: string
+          description: Descuento fijo aplicado (decimal string, default 0)
+          example: "0"
+        amount_paid:
+          type: string
+          description: Monto pagado por el cliente (decimal string)
+          example: "1500.00"
+        currency:
+          type: string
+          default: ARS
+          example: ARS
+        notes:
+          type: string
+
+    POSSaleItemRequest:
+      type: object
+      required: [sku, quantity, unit_price]
+      properties:
+        sku:
+          type: string
+          example: SKU-001
+        quantity:
+          type: integer
+          minimum: 1
+        unit_price:
+          type: string
+          description: Precio unitario (decimal string)
+          example: "500.00"
+
+    POSSaleResponse:
+      type: object
+      properties:
+        pos_sale_id:
+          type: string
+          format: uuid
+        sale_number:
+          type: string
+          description: Numero de venta (UUID)
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/POSSaleItemResponse"
+        total_items:
+          type: integer
+        subtotal_amount:
+          type: string
+          description: Suma de subtotales antes de descuento (decimal)
+        discount_amount:
+          type: string
+          description: Descuento aplicado (decimal)
+        final_amount:
+          type: string
+          description: Total final despues de descuento (decimal)
+        payment_method_id:
+          type: string
+          format: uuid
+        payment_method_name:
+          type: string
+          description: Nombre legible del metodo de pago
+        amount_paid:
+          type: string
+          description: Monto pagado (decimal)
+        change:
+          type: string
+          description: Vuelto (decimal)
+        currency:
+          type: string
+          example: ARS
+        customer_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    POSSaleItemResponse:
+      type: object
+      properties:
+        item_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        product_name:
+          type: string
+        quantity:
+          type: integer
+        unit_price:
+          type: string
+          description: Precio unitario (decimal)
+        subtotal:
+          type: string
+          description: Subtotal del item (decimal)
+        stock_entry_id:
+          type: string
+          format: uuid
+
+    ListPosSalesResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosSaleListItem"
+        total_count:
+          type: integer
+
+    PosSaleListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        payment_method_id:
+          type: string
+          format: uuid
+        total_amount:
+          type: string
+          description: Suma de subtotales (decimal)
+        discount_amount:
+          type: string
+          description: Descuento aplicado (decimal)
+        final_amount:
+          type: string
+          description: Total final (decimal)
+        currency:
+          type: string
+        total_items:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Customer Credits ──
+    CreateCustomerCreditRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+          description: Monto del credito a cuenta
+
+    CreateCustomerCreditResponse:
+      type: object
+      properties:
+        credit_id:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: double
+        status:
+          type: string
+          enum: [AVAILABLE]
+
+    # ── Reports ──
+    DailyReportResponse:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+          example: "2026-04-18"
+        pos_sales_count:
+          type: integer
+          description: Cantidad de ventas POS
+        orders_count:
+          type: integer
+          description: Cantidad de ordenes
+        total_transactions:
+          type: integer
+          description: pos_sales_count + orders_count
+        pos_gross_total:
+          type: string
+          description: Suma total_amount (decimal)
+        pos_discounts:
+          type: string
+          description: Suma discount_amount (decimal)
+        pos_net_total:
+          type: string
+          description: Suma final_amount (decimal)
+        first_transaction_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_transaction_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    OpenOrdersReportResponse:
+      type: object
+      properties:
+        summary:
+          $ref: "#/components/schemas/OpenOrdersSummary"
+        bucket_counts:
+          $ref: "#/components/schemas/BucketCounts"
+        orders:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpenOrderRow"
+
+    OpenOrdersSummary:
+      type: object
+      properties:
+        total_open_orders:
+          type: integer
+        total_outstanding_amount:
+          type: number
+          format: double
+
+    BucketCounts:
+      type: object
+      description: Conteos por bucket de aging para badges en tabs UI
+      properties:
+        0_30:
+          type: integer
+        31_60:
+          type: integer
+        61_90:
+          type: integer
+        90_plus:
+          type: integer
+
+    OpenOrderRow:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        total_amount:
+          type: number
+          format: double
+        total_paid:
+          type: number
+          format: double
+        remaining:
+          type: number
+          format: double
+        status:
+          type: string
+          enum: [CREATED, CONFIRMED]
+        confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        days_since_confirmed:
+          type: integer
+
+    AgingReportResponse:
+      type: object
+      properties:
+        total_outstanding:
+          type: number
+          format: double
+        customers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgingRow"
+
+    AgingRow:
+      type: object
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        bucket_0_30:
+          type: number
+          format: double
+        bucket_31_60:
+          type: number
+          format: double
+        bucket_61_90:
+          type: number
+          format: double
+        bucket_90_plus:
+          type: number
+          format: double
+        total:
+          type: number
+          format: double
+
+    CustomerBalanceResponse:
+      type: object
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        summary:
+          $ref: "#/components/schemas/CustomerBalanceSummary"
+        aging:
+          $ref: "#/components/schemas/AgingRow"
+        bucket_counts:
+          $ref: "#/components/schemas/BucketCounts"
+        open_orders:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpenOrderRow"
+
+    CustomerBalanceSummary:
+      type: object
+      properties:
+        total_outstanding:
+          type: number
+          format: double
+        open_orders_count:
+          type: integer
+        oldest_debt_days:
+          type: integer
+        last_payment_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    # ── Internal ──
+    MetricsEventRequest:
+      type: object
+      required: [event]
+      properties:
+        event:
+          type: string
+          description: "Eventos soportados: quickstart_started, quickstart_completed"
+          enum: [quickstart_started, quickstart_completed]
