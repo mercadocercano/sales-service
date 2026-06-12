@@ -7,6 +7,10 @@
 **Lenguaje:** Go 1.22+  
 **Estado:** ✅ PRODUCCIÓN (H6-A.2) - Core Comercial Operativo
 
+## Documentación
+
+Ver [`docs/`](docs/README.md) para ADRs, hitos, guías de testing y runbooks operativos.
+
 ## Estado en producción (Mar 2026)
 
 | Aspecto | Estado |
@@ -328,7 +332,7 @@ docker exec mc-postgres psql -U postgres -d ledger_db \
 - `POST /api/v1/sales/pos` funciona
 - `POST /api/v1/pos/sale` → 404
 
-**Documentación:** `HITO_V0.5_ROUTES_ALIGNMENT.md`
+**Documentación:** [`docs/hitos/HITO_V0.5_ROUTES_ALIGNMENT.md`](docs/hitos/HITO_V0.5_ROUTES_ALIGNMENT.md)
 
 ---
 
@@ -380,7 +384,7 @@ docker exec mc-postgres psql -U postgres -d ledger_db \
 - ✅ Imports actualizados (masivo)
 - ✅ Docker Compose + Kong actualizados
 
-**Documentación:** `HITO_V0.2_RENAME_COMPLETE.md`
+**Documentación:** [`docs/hitos/HITO_V0.2_RENAME_COMPLETE.md`](docs/hitos/HITO_V0.2_RENAME_COMPLETE.md)
 
 ---
 
@@ -397,24 +401,27 @@ docker exec mc-postgres psql -U postgres -d ledger_db \
 - ✅ Integración con ledger-service
 - ✅ Ledger entries automáticos
 
-**Documentación:** `HITO_V0.1_IMPLEMENTATION.md`
+**Documentación:** [`docs/hitos/HITO_V0.1_IMPLEMENTATION.md`](docs/hitos/HITO_V0.1_IMPLEMENTATION.md)
 
 ---
 
 ## 📚 Documentación Técnica
 
+Índice completo en [`docs/`](docs/README.md): ADRs, hitos, guías de testing y runbooks.
+
 ### Hitos del Servicio
-- **HITO v0.5:** `HITO_V0.5_ROUTES_ALIGNMENT.md`
-- **HITO v0.2:** `HITO_V0.2_RENAME_COMPLETE.md`
-- **HITO v0.1:** `HITO_V0.1_IMPLEMENTATION.md`
+- **HITO v0.5:** [`docs/hitos/HITO_V0.5_ROUTES_ALIGNMENT.md`](docs/hitos/HITO_V0.5_ROUTES_ALIGNMENT.md)
+- **HITO v0.2:** [`docs/hitos/HITO_V0.2_RENAME_COMPLETE.md`](docs/hitos/HITO_V0.2_RENAME_COMPLETE.md)
+- **HITO v0.1:** [`docs/hitos/HITO_V0.1_IMPLEMENTATION.md`](docs/hitos/HITO_V0.1_IMPLEMENTATION.md)
 
 ### Arquitectura
+- **Decisiones (ADR):** [`docs/adr/`](docs/adr/)
 - **Arquitectura ERP:** `../../documentation/ERP_MERCADO_CERCANO_ARQUITECTURA_V1.md`
 - **Ficha técnica:** `../../documentation/components/sales-service.md`
 
 ### Testing Guides
-- **Snapshot Feature:** `README_HITO_ORD-02.md`
-- **POS Testing:** `POS_SALE_02_TESTING_GUIDE.md`
+- **Snapshot Feature:** [`docs/hitos/README_HITO_ORD-02.md`](docs/hitos/README_HITO_ORD-02.md)
+- **POS Testing:** [`docs/guides/POS_SALE_02_TESTING_GUIDE.md`](docs/guides/POS_SALE_02_TESTING_GUIDE.md)
 
 ---
 
