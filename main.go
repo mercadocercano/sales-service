@@ -20,21 +20,13 @@ import (
 	sharedConfig "sales/src/shared/infrastructure/config"
 
 	"github.com/gin-gonic/gin"
-	_ "github.com/lib/pq" // Driver de PostgreSQL
+	"github.com/hornosg/go-shared/infrastructure/env"
 	tenantmw "github.com/hornosg/go-shared/infrastructure/middleware"
+	_ "github.com/lib/pq" // Driver de PostgreSQL
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	
+
 	"github.com/mercadocercano/eventbus"
 )
-
-// getEnv obtiene una variable de entorno o devuelve un valor por defecto
-func getEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
 
 // connectWithRetry intenta conectar a PostgreSQL con backoff exponencial.
 // Retorna nil si no logra conectar después de todos los reintentos.
@@ -103,11 +95,11 @@ func main() {
 	sharedConfig.SetupSharedMiddleware(router, gzipSharedCfg)
 
 	// Obtener configuración de la base de datos de variables de entorno
-	dbHost := getEnv("DB_HOST", "localhost")
-	dbPort := getEnv("DB_PORT", "5432")
-	dbUser := getEnv("DB_USER", "postgres")
-	dbPassword := getEnv("DB_PASSWORD", "postgres")
-	dbName := getEnv("DB_NAME", "order_db")
+	dbHost := env.Get("DB_HOST", "localhost")
+	dbPort := env.Get("DB_PORT", "5432")
+	dbUser := env.Get("DB_USER", "postgres")
+	dbPassword := env.Get("DB_PASSWORD", "postgres")
+	dbName := env.Get("DB_NAME", "order_db")
 
 	// Máximo de reintentos para conexiones DB (cubre ~60s de espera con backoff exponencial)
 	maxRetries := 10
@@ -121,7 +113,7 @@ func main() {
 	}
 
 	// Conectar a payment_method_db con retry
-	pmDBName := getEnv("PAYMENT_METHOD_DB_NAME", "payment_method_db")
+	pmDBName := env.Get("PAYMENT_METHOD_DB_NAME", "payment_method_db")
 	pmConnStr := "postgres://" + dbUser + ":" + dbPassword + "@" + dbHost + ":" + dbPort + "/" + pmDBName + "?sslmode=disable"
 	log.Printf("Intentando conectar a payment_method_db: %s", pmConnStr)
 	paymentMethodDB := connectWithRetry(pmConnStr, "payment_method_db", maxRetries)
@@ -130,11 +122,11 @@ func main() {
 	}
 
 	// Conectar a EventBus DB con retry
-	eventBusHost := getEnv("EVENTBUS_DB_HOST", dbHost)
-	eventBusPort := getEnv("EVENTBUS_DB_PORT", "5432")
-	eventBusUser := getEnv("EVENTBUS_DB_USER", dbUser)
-	eventBusPassword := getEnv("EVENTBUS_DB_PASSWORD", dbPassword)
-	eventBusName := getEnv("EVENTBUS_DB_NAME", "eventbus")
+	eventBusHost := env.Get("EVENTBUS_DB_HOST", dbHost)
+	eventBusPort := env.Get("EVENTBUS_DB_PORT", "5432")
+	eventBusUser := env.Get("EVENTBUS_DB_USER", dbUser)
+	eventBusPassword := env.Get("EVENTBUS_DB_PASSWORD", dbPassword)
+	eventBusName := env.Get("EVENTBUS_DB_NAME", "eventbus")
 
 	eventBusConnStr := "postgres://" + eventBusUser + ":" + eventBusPassword + "@" + eventBusHost + ":" + eventBusPort + "/" + eventBusName + "?sslmode=disable"
 	log.Printf("Intentando conectar a eventbus: %s", eventBusConnStr)
@@ -161,7 +153,7 @@ func main() {
 	setupSalesModule(v1, db, paymentMethodDB, publishUseCase)
 
 	// Iniciar el servidor
-	port := getEnv("PORT", "8080")
+	port := env.Get("PORT", "8080")
 	log.Printf("✅ Servidor Sales Service iniciado en http://localhost:%s", port)
 	log.Printf("✅ Health endpoint: GET http://localhost:%s/health", port)
 	log.Printf("✅ Health endpoint: GET http://localhost:%s/api/v1/health", port)
@@ -187,7 +179,7 @@ func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 
 	// HITO v0.6: Crear cliente de customer-service
 	// H8: Crear cliente de tenant (IAM) para TTFS
-	kongBaseURL := getEnv("KONG_URL", getEnv("KONG_INTERNAL_URL", "http://localhost:8001"))
+	kongBaseURL := env.Get("KONG_URL", env.Get("KONG_INTERNAL_URL", "http://localhost:8001"))
 	customerClient := salesClient.NewCustomerClient(kongBaseURL)
 	tenantClient := salesClient.NewTenantClient(kongBaseURL)
 
