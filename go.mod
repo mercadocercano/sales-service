@@ -5,8 +5,7 @@ go 1.25.0
 require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/google/uuid v1.6.0
-	github.com/hornosg/go-shared v0.6.0
-	github.com/lib/pq v1.10.9
+	github.com/hornosg/go-shared v0.7.0
 	github.com/mercadocercano/eventbus v0.1.0
 	github.com/prometheus/client_golang v1.22.0
 	github.com/shopspring/decimal v1.4.0
@@ -32,6 +31,7 @@ require (
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
+	github.com/lib/pq v1.10.9 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect

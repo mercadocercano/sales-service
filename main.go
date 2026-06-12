@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"os"
@@ -22,27 +23,30 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/hornosg/go-shared/infrastructure/env"
 	tenantmw "github.com/hornosg/go-shared/infrastructure/middleware"
-	_ "github.com/lib/pq" // Driver de PostgreSQL
+	"github.com/hornosg/go-shared/infrastructure/postgres"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/mercadocercano/eventbus"
 )
 
-// connectWithRetry intenta conectar a PostgreSQL con backoff exponencial.
-// Retorna nil si no logra conectar después de todos los reintentos.
-func connectWithRetry(connStr, label string, maxRetries int) *sql.DB {
+// connectWithRetry intenta conectar a PostgreSQL con backoff exponencial,
+// usando el helper compartido go-shared postgres.Connect (DSN + open + Ping +
+// pool defaults). Retorna nil si no logra conectar después de todos los
+// reintentos. En la conexión exitosa arranca el monitor de saturación del pool.
+func connectWithRetry(cfg postgres.Config, label string, maxRetries int) *sql.DB {
 	backoff := 2 * time.Second
 	const maxBackoff = 30 * time.Second
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		db, err := sql.Open("postgres", connStr)
+		db, err := postgres.Connect(cfg)
 		if err != nil {
-			log.Printf("⚠️  [%s] Intento %d/%d - Error al abrir conexión: %v", label, attempt, maxRetries, err)
-		} else if err = db.Ping(); err != nil {
-			log.Printf("⚠️  [%s] Intento %d/%d - Ping falló: %v", label, attempt, maxRetries, err)
-			db.Close()
+			log.Printf("⚠️  [%s] Intento %d/%d - Error al conectar: %v", label, attempt, maxRetries, err)
 		} else {
 			log.Printf("✅ Conexión a %s establecida con éxito (intento %d)", label, attempt)
+			postgres.StartPoolMonitor(context.Background(), db, postgres.MonitorOptions{
+				Service: "sales-service",
+				DBName:  cfg.DBName,
+			})
 			return db
 		}
 
@@ -105,18 +109,30 @@ func main() {
 	maxRetries := 10
 
 	// Conectar a order_db con retry
-	connStr := "postgres://" + dbUser + ":" + dbPassword + "@" + dbHost + ":" + dbPort + "/" + dbName + "?sslmode=disable"
-	log.Printf("Intentando conectar a order_db: %s", connStr)
-	db := connectWithRetry(connStr, "order_db", maxRetries)
+	log.Printf("Intentando conectar a order_db (host=%s port=%s db=%s)", dbHost, dbPort, dbName)
+	db := connectWithRetry(postgres.Config{
+		Host:     dbHost,
+		Port:     dbPort,
+		User:     dbUser,
+		Password: dbPassword,
+		DBName:   dbName,
+		SSLMode:  "disable",
+	}, "order_db", maxRetries)
 	if db != nil {
 		defer db.Close()
 	}
 
 	// Conectar a payment_method_db con retry
 	pmDBName := env.Get("PAYMENT_METHOD_DB_NAME", "payment_method_db")
-	pmConnStr := "postgres://" + dbUser + ":" + dbPassword + "@" + dbHost + ":" + dbPort + "/" + pmDBName + "?sslmode=disable"
-	log.Printf("Intentando conectar a payment_method_db: %s", pmConnStr)
-	paymentMethodDB := connectWithRetry(pmConnStr, "payment_method_db", maxRetries)
+	log.Printf("Intentando conectar a payment_method_db (host=%s port=%s db=%s)", dbHost, dbPort, pmDBName)
+	paymentMethodDB := connectWithRetry(postgres.Config{
+		Host:     dbHost,
+		Port:     dbPort,
+		User:     dbUser,
+		Password: dbPassword,
+		DBName:   pmDBName,
+		SSLMode:  "disable",
+	}, "payment_method_db", maxRetries)
 	if paymentMethodDB != nil {
 		defer paymentMethodDB.Close()
 	}
@@ -128,9 +144,15 @@ func main() {
 	eventBusPassword := env.Get("EVENTBUS_DB_PASSWORD", dbPassword)
 	eventBusName := env.Get("EVENTBUS_DB_NAME", "eventbus")
 
-	eventBusConnStr := "postgres://" + eventBusUser + ":" + eventBusPassword + "@" + eventBusHost + ":" + eventBusPort + "/" + eventBusName + "?sslmode=disable"
-	log.Printf("Intentando conectar a eventbus: %s", eventBusConnStr)
-	eventBusDB := connectWithRetry(eventBusConnStr, "eventbus", maxRetries)
+	log.Printf("Intentando conectar a eventbus (host=%s port=%s db=%s)", eventBusHost, eventBusPort, eventBusName)
+	eventBusDB := connectWithRetry(postgres.Config{
+		Host:     eventBusHost,
+		Port:     eventBusPort,
+		User:     eventBusUser,
+		Password: eventBusPassword,
+		DBName:   eventBusName,
+		SSLMode:  "disable",
+	}, "eventbus", maxRetries)
 
 	var publishUseCase *eventbus.PublishEventUseCase
 	if eventBusDB != nil {
