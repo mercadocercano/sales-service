@@ -45,3 +45,7 @@ tmp/
 .gitconfig
 *-management/
 .cursorrules
+
+# Engram
+.engram/engram.db
+.engram/*.db-*
