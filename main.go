@@ -21,7 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq" // Driver de PostgreSQL
-	tenantmw "github.com/mercadocercano/middleware"
+	tenantmw "github.com/hornosg/go-shared/infrastructure/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	
 	"github.com/mercadocercano/eventbus"
