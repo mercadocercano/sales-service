@@ -9,6 +9,7 @@ import (
 	"sales/src/sales/application/usecase"
 
 	"github.com/gin-gonic/gin"
+	httpresp "github.com/hornosg/go-shared/infrastructure/response"
 	"github.com/shopspring/decimal"
 )
 
@@ -38,22 +39,22 @@ func (c *CustomerController) RegisterRoutes(router *gin.RouterGroup) {
 // Body: { "amount": number }. Respuesta 201: { "credit_id", "amount", "status": "AVAILABLE" }
 func (c *CustomerController) CreateCredit(ctx *gin.Context) {
 	if c.createCreditUC == nil {
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "Create credit not available (database or eventbus not configured)"})
+		httpresp.JSON(ctx, http.StatusServiceUnavailable, "Create credit not available (database or eventbus not configured)")
 		return
 	}
 	tenantID := ctx.GetHeader("X-Tenant-ID")
 	if tenantID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "X-Tenant-ID header is required"})
+		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
 		return
 	}
 	customerID := ctx.Param("customer_id")
 	if customerID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "customer_id is required"})
+		httpresp.JSON(ctx, http.StatusBadRequest, "customer_id is required")
 		return
 	}
 	var req request.CreateCustomerCreditRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
+		httpresp.JSONWithDetails(ctx, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
 	amountDec := decimal.NewFromFloat(req.Amount)
@@ -61,10 +62,10 @@ func (c *CustomerController) CreateCredit(ctx *gin.Context) {
 	if err != nil {
 		log.Printf("Error creating customer credit: %v", err)
 		if err.Error() == "amount must be greater than zero" {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpresp.JSON(ctx, http.StatusBadRequest, err.Error())
 			return
 		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create credit", "details": err.Error()})
+		httpresp.JSONWithDetails(ctx, http.StatusInternalServerError, "Failed to create credit", err.Error())
 		return
 	}
 	ctx.JSON(http.StatusCreated, response.CreateCustomerCreditResponse{

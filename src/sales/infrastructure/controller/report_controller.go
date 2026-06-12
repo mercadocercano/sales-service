@@ -11,15 +11,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/hornosg/go-shared/infrastructure/response"
 )
 
 // ReportController maneja las peticiones HTTP para reportes
 // HITO C - Reportes Diarios + Open Orders + Aging + Customer Balance
 type ReportController struct {
-	dailyReportUC       *usecase.DailyReportUseCase
-	openOrdersReportUC  *reports.GetOpenOrdersReportUseCase
-	agingReportUC       *reports.GetAgingReportUseCase
-	customerBalanceUC   *reports.GetCustomerBalanceUseCase
+	dailyReportUC      *usecase.DailyReportUseCase
+	openOrdersReportUC *reports.GetOpenOrdersReportUseCase
+	agingReportUC      *reports.GetAgingReportUseCase
+	customerBalanceUC  *reports.GetCustomerBalanceUseCase
 }
 
 // NewReportController crea una nueva instancia del controlador
@@ -43,7 +44,7 @@ func (c *ReportController) RegisterRoutes(router *gin.RouterGroup) {
 	log.Printf("🔍 DEBUG: openOrdersReportUC is nil? %v", c.openOrdersReportUC == nil)
 	log.Printf("🔍 DEBUG: agingReportUC is nil? %v", c.agingReportUC == nil)
 	log.Printf("🔍 DEBUG: customerBalanceUC is nil? %v", c.customerBalanceUC == nil)
-	
+
 	reports := router.Group("/reports")
 	{
 		reports.GET("/daily", c.DailyReport)
@@ -76,9 +77,7 @@ func (c *ReportController) DailyReport(ctx *gin.Context) {
 	// ========================================================================
 	tenantID := ctx.GetHeader("X-Tenant-ID")
 	if tenantID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"error": "X-Tenant-ID header is required",
-		})
+		response.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
 		return
 	}
 
@@ -87,9 +86,7 @@ func (c *ReportController) DailyReport(ctx *gin.Context) {
 	// ========================================================================
 	tenantUUID, err := uuid.Parse(tenantID)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid X-Tenant-ID format",
-		})
+		response.JSON(ctx, http.StatusBadRequest, "Invalid X-Tenant-ID format")
 		return
 	}
 
@@ -98,9 +95,7 @@ func (c *ReportController) DailyReport(ctx *gin.Context) {
 	// ========================================================================
 	date := ctx.Query("date")
 	if date == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"error": "date query parameter is required (format: YYYY-MM-DD)",
-		})
+		response.JSON(ctx, http.StatusBadRequest, "date query parameter is required (format: YYYY-MM-DD)")
 		return
 	}
 
@@ -113,18 +108,12 @@ func (c *ReportController) DailyReport(ctx *gin.Context) {
 
 		// Si es error de formato de fecha → 400
 		if contains(err.Error(), "invalid date format") {
-			ctx.JSON(http.StatusBadRequest, gin.H{
-				"error":   "Invalid date format",
-				"details": err.Error(),
-			})
+			response.JSONWithDetails(ctx, http.StatusBadRequest, "Invalid date format", err.Error())
 			return
 		}
 
 		// Otros errores → 500
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Error generating daily report",
-			"details": err.Error(),
-		})
+		response.JSONWithDetails(ctx, http.StatusInternalServerError, "Error generating daily report", err.Error())
 		return
 	}
 
@@ -142,7 +131,7 @@ func (c *ReportController) GetOpenOrdersReport(ctx *gin.Context) {
 
 	tenantID := ctx.GetHeader("X-Tenant-ID")
 	if tenantID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "X-Tenant-ID header is required"})
+		response.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
 		return
 	}
 
@@ -163,17 +152,14 @@ func (c *ReportController) GetOpenOrdersReport(ctx *gin.Context) {
 	sort := ctx.Query("sort")
 
 	if c.openOrdersReportUC == nil {
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "Open orders report not available"})
+		response.JSON(ctx, http.StatusServiceUnavailable, "Open orders report not available")
 		return
 	}
 
 	resp, err := c.openOrdersReportUC.Execute(ctx.Request.Context(), tenantID, page, pageSize, agingBucket, customerID, sort)
 	if err != nil {
 		log.Printf("Error generating open orders report: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Error generating open orders report",
-			"details": err.Error(),
-		})
+		response.JSONWithDetails(ctx, http.StatusInternalServerError, "Error generating open orders report", err.Error())
 		return
 	}
 	ctx.JSON(http.StatusOK, resp)
@@ -185,12 +171,12 @@ func (c *ReportController) GetOpenOrdersReport(ctx *gin.Context) {
 func (c *ReportController) GetCustomerBalanceReport(ctx *gin.Context) {
 	tenantID := ctx.GetHeader("X-Tenant-ID")
 	if tenantID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "X-Tenant-ID header is required"})
+		response.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
 		return
 	}
 	customerID := ctx.Query("customer_id")
 	if customerID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "customer_id query parameter is required"})
+		response.JSON(ctx, http.StatusBadRequest, "customer_id query parameter is required")
 		return
 	}
 
@@ -210,17 +196,14 @@ func (c *ReportController) GetCustomerBalanceReport(ctx *gin.Context) {
 	sort := ctx.Query("sort")
 
 	if c.customerBalanceUC == nil {
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "Customer balance report not available"})
+		response.JSON(ctx, http.StatusServiceUnavailable, "Customer balance report not available")
 		return
 	}
 
 	resp, err := c.customerBalanceUC.Execute(ctx.Request.Context(), tenantID, customerID, page, pageSize, agingBucket, sort)
 	if err != nil {
 		log.Printf("Error generating customer balance report: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Error generating customer balance report",
-			"details": err.Error(),
-		})
+		response.JSONWithDetails(ctx, http.StatusInternalServerError, "Error generating customer balance report", err.Error())
 		return
 	}
 	ctx.JSON(http.StatusOK, resp)
@@ -233,22 +216,19 @@ func (c *ReportController) GetAgingReport(ctx *gin.Context) {
 
 	tenantID := ctx.GetHeader("X-Tenant-ID")
 	if tenantID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "X-Tenant-ID header is required"})
+		response.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
 		return
 	}
 
 	if c.agingReportUC == nil {
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "Aging report not available"})
+		response.JSON(ctx, http.StatusServiceUnavailable, "Aging report not available")
 		return
 	}
 
 	resp, err := c.agingReportUC.Execute(ctx.Request.Context(), tenantID)
 	if err != nil {
 		log.Printf("Error generating aging report: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Error generating aging report",
-			"details": err.Error(),
-		})
+		response.JSONWithDetails(ctx, http.StatusInternalServerError, "Error generating aging report", err.Error())
 		return
 	}
 	ctx.JSON(http.StatusOK, resp)

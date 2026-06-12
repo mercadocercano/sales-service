@@ -7,6 +7,7 @@ import (
 	"sales/src/sales/infrastructure/metrics"
 
 	"github.com/gin-gonic/gin"
+	"github.com/hornosg/go-shared/infrastructure/response"
 )
 
 // MetricsController H8: endpoint para eventos de métricas desde frontend
@@ -38,7 +39,7 @@ func (c *MetricsController) requireInternalAuth() gin.HandlerFunc {
 			return
 		}
 		if ctx.GetHeader("X-Metrics-Key") != c.secret {
-			ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			response.Abort(ctx, http.StatusForbidden, "forbidden")
 			return
 		}
 		ctx.Next()
@@ -55,7 +56,7 @@ type EventRequest struct {
 func (c *MetricsController) RecordEvent(ctx *gin.Context) {
 	var req EventRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "event is required"})
+		response.JSON(ctx, http.StatusBadRequest, "event is required")
 		return
 	}
 	switch req.Event {
@@ -64,7 +65,7 @@ func (c *MetricsController) RecordEvent(ctx *gin.Context) {
 	case "quickstart_completed":
 		metrics.QuickstartCompletedTotal.Inc()
 	default:
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "unknown event: " + req.Event})
+		response.JSON(ctx, http.StatusBadRequest, "unknown event: "+req.Event)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"ok": true})
