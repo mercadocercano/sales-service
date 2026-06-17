@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # ==============================================
 # Sales Service - Multi-stage Dockerfile
 # ==============================================
@@ -10,13 +11,17 @@ WORKDIR /app
 
 RUN apk add --no-cache git ca-certificates tzdata
 
-# Configure private Go modules
-ARG GITHUB_TOKEN
+# Configure private Go modules. El token llega como BuildKit secret y NUNCA
+# queda en una capa: se usa solo durante este RUN y se borra el gitconfig al final.
 ENV GOPRIVATE=github.com/mercadocercano/*
-RUN if [ -n "$GITHUB_TOKEN" ]; then git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; fi
 
 COPY go.mod go.sum ./
-RUN go mod download && go mod verify
+RUN --mount=type=secret,id=github_token \
+    if [ -s /run/secrets/github_token ]; then \
+      git config --global url."https://$(cat /run/secrets/github_token)@github.com/".insteadOf "https://github.com/"; \
+    fi && \
+    go mod download && go mod verify && \
+    rm -f /root/.gitconfig
 
 # ==============================================
 # Stage 2: Build stage
@@ -39,15 +44,14 @@ FROM mercado-cercano/go-dev:1.25 AS development
 
 WORKDIR /app
 
-# Configure private Go modules
-ARG GITHUB_TOKEN
-RUN if [ -n "$GITHUB_TOKEN" ]; then git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; fi
-
-# Copy go mod files first (for better caching)
+# Configure private Go modules (token via BuildKit secret — never persisted)
 COPY go.mod go.sum ./
-
-# Download dependencies
-RUN go mod download
+RUN --mount=type=secret,id=github_token \
+    if [ -s /run/secrets/github_token ]; then \
+      git config --global url."https://$(cat /run/secrets/github_token)@github.com/".insteadOf "https://github.com/"; \
+    fi && \
+    go mod download && \
+    rm -f /root/.gitconfig
 
 # Create necessary directories and set permissions
 RUN mkdir -p tmp scripts uploads logs /go/pkg/mod && \
@@ -66,7 +70,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 EXPOSE 8080
 
-CMD sh -c 'if [ -n "$GITHUB_TOKEN" ]; then git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; fi && air -c .air.toml'
+CMD sh -c 'air -c .air.toml'
 
 # ==============================================
 # Stage 4: Migrate stage (Alpine + psql para Job K8s)
