@@ -299,6 +299,20 @@ func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 		createCustomerCreditUC = salesUseCase.NewCreateCustomerCreditUseCase(creditRepo, publishUseCase)
 	}
 
+	// E18 Tramo A - Caja POS (ADR-003, L4). Tablas de caja viven en el mismo sales DB.
+	var cashSessionCtrl *salesController.CashSessionController
+	if db != nil {
+		cashRepo := salesPersistence.NewCashRegisterPostgresRepository(db)
+		cashConfig := salesAdapter.NewEnvCashConfigAdapter()
+		openCashUC := salesUseCase.NewOpenCashSessionUseCase(cashRepo, cashConfig, publishUseCase)
+		currentCashUC := salesUseCase.NewGetCurrentCashSessionUseCase(cashRepo)
+		getCashUC := salesUseCase.NewGetCashSessionUseCase(cashRepo, paymentMethodAdapter)
+		movementUC := salesUseCase.NewRegisterCashMovementUseCase(cashRepo, publishUseCase)
+		closeCashUC := salesUseCase.NewCloseCashSessionUseCase(cashRepo, paymentMethodAdapter, publishUseCase)
+		approveCashUC := salesUseCase.NewApproveCashReviewUseCase(cashRepo, publishUseCase)
+		cashSessionCtrl = salesController.NewCashSessionController(openCashUC, currentCashUC, getCashUC, movementUC, closeCashUC, approveCashUC)
+	}
+
 	// Crear controladores
 	salesCtrl := salesController.NewOrderController(validateStockUC, reserveStockUC, releaseStockUC, createOrderUC, confirmOrderUC, cancelOrderUC, listOrdersUC, getOrderUC, getOrderFinancialUC, posSaleUC, listPosSalesUC, getPosSaleUC, generatePosSalePdfUC, registerPaymentUC, applyCustomerCreditUC)
 
@@ -317,6 +331,9 @@ func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 
 	// Registrar rutas
 	salesCtrl.RegisterRoutes(router)
+	if cashSessionCtrl != nil {
+		cashSessionCtrl.RegisterRoutes(router)
+	}
 	customerCtrl := salesController.NewCustomerController(createCustomerCreditUC)
 	customerCtrl.RegisterRoutes(router)
 	reportCtrl.RegisterRoutes(router)

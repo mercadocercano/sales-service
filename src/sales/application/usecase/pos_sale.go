@@ -227,6 +227,10 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest, 
 			return nil, fmt.Errorf("error creating pos_sale entity: %w", err)
 		}
 
+		// E18 Tramo A: asociación venta↔caja (modo DEGRADADO). Se pasa la sesión pedida;
+		// el repositorio la asocia solo si está abierta para el tenant, si no deja NULL.
+		posSale.CashRegisterSessionID = req.CashRegisterSessionID
+
 		// ========================================================================
 		// PASO 4: PERSISTIR ATOMICALLY
 		// HITO D: Si falla persistencia → compensar todo el stock descontado

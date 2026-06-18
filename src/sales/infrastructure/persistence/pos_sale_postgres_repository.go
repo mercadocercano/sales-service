@@ -46,15 +46,37 @@ func (r *PosSalePostgresRepository) Create(ctx context.Context, sale *entity.Pos
 	}
 	sale.SaleNumber = &saleNumber
 
+	// 0.b E18 Tramo A: asociación venta↔caja en modo DEGRADADO (ADR-003 §4). Solo se
+	// asocia si la sesión pedida está ABIERTA para el tenant; el FOR UPDATE serializa
+	// contra un cierre concurrente (si el cierre ya commiteó, la venta la verá no-open y
+	// procede con NULL — nunca se pierde, no se fuerza reapertura porque el cierre es
+	// monolítico atómico). Si no viene sesión o no está abierta ⇒ FK NULL.
+	var cashSessionID interface{} = nil
+	if sale.CashRegisterSessionID != nil {
+		var openID uuid.UUID
+		lockErr := tx.QueryRowContext(ctx,
+			`SELECT id FROM cash_register_sessions WHERE id=$1 AND tenant_id=$2 AND status='open' FOR UPDATE`,
+			*sale.CashRegisterSessionID, sale.TenantID,
+		).Scan(&openID)
+		switch lockErr {
+		case nil:
+			cashSessionID = openID
+		case sql.ErrNoRows:
+			sale.CashRegisterSessionID = nil // degradado: la sesión no está abierta
+		default:
+			return fmt.Errorf("error validating cash session: %w", lockErr)
+		}
+	}
+
 	// 1. Insertar pos_sale (aggregate root)
 	// HITO: POST /pos/sale devuelve DTO listo para imprimir
 	querySale := `
 		INSERT INTO pos_sales (
 			id, tenant_id, customer_id, payment_method_id,
 			total_amount, discount_amount, final_amount,
-			amount_paid, change, currency, sale_number, created_at
+			amount_paid, change, currency, sale_number, cash_register_session_id, created_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 		)
 	`
 
@@ -70,6 +92,7 @@ func (r *PosSalePostgresRepository) Create(ctx context.Context, sale *entity.Pos
 		sale.Change,
 		sale.Currency,
 		saleNumber,
+		cashSessionID,
 		sale.CreatedAt,
 	)
 

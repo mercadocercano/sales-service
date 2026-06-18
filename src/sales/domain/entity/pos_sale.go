@@ -22,6 +22,8 @@ type PosSale struct {
 	Change          decimal.Decimal `json:"change"`            // Vuelto (amount_paid - final_amount)
 	Currency        string          `json:"currency"`
 	SaleNumber      *int            `json:"sale_number"` // E18 Tramo B: número de comprobante INTERNO (no fiscal). nil hasta persistir.
+	// E18 Tramo A: caja asociada (modo DEGRADADO). nil = venta sin caja (no se bloquea).
+	CashRegisterSessionID *uuid.UUID `json:"cash_register_session_id,omitempty"`
 	CreatedAt       time.Time       `json:"created_at"`
 	Items           []PosSaleItem   `json:"items"` // DDD: Collection of entities
 }

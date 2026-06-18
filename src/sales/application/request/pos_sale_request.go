@@ -24,4 +24,7 @@ type POSSaleRequest struct {
 	AmountPaid      decimal.Decimal      `json:"amount_paid" binding:"required"`
 	Currency        string               `json:"currency,omitempty"`
 	Notes           string               `json:"notes,omitempty"`
+	// E18 Tramo A: caja a la que asociar la venta (modo DEGRADADO, ADR-003 §4). Opcional:
+	// si no viene, o la sesión no está abierta, la venta procede con FK NULL (no se bloquea).
+	CashRegisterSessionID *uuid.UUID `json:"cash_register_session_id,omitempty"`
 }
