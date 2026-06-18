@@ -18,6 +18,14 @@ func (m *MockPosSaleRepository) Create(ctx context.Context, sale *entity.PosSale
 	return args.Error(0)
 }
 
+func (m *MockPosSaleRepository) GetByID(ctx context.Context, tenantID, saleID uuid.UUID) (*entity.PosSale, error) {
+	args := m.Called(ctx, tenantID, saleID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*entity.PosSale), args.Error(1)
+}
+
 func (m *MockPosSaleRepository) ListByTenant(ctx context.Context, tenantID uuid.UUID) ([]*entity.PosSale, error) {
 	args := m.Called(ctx, tenantID)
 	if args.Get(0) == nil {

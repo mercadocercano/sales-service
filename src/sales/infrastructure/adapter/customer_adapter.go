@@ -21,3 +21,7 @@ func NewCustomerAdapter(c *client.CustomerClient) *CustomerAdapter {
 func (a *CustomerAdapter) Exists(ctx context.Context, tenantID uuid.UUID, customerID uuid.UUID) (bool, error) {
 	return a.client.Exists(ctx, tenantID, customerID)
 }
+
+func (a *CustomerAdapter) GetName(ctx context.Context, tenantID uuid.UUID, customerID uuid.UUID) (string, error) {
+	return a.client.GetName(ctx, tenantID, customerID)
+}

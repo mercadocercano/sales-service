@@ -16,3 +16,8 @@ func (m *MockCustomerPort) Exists(ctx context.Context, tenantID uuid.UUID, custo
 	args := m.Called(ctx, tenantID, customerID)
 	return args.Bool(0), args.Error(1)
 }
+
+func (m *MockCustomerPort) GetName(ctx context.Context, tenantID uuid.UUID, customerID uuid.UUID) (string, error) {
+	args := m.Called(ctx, tenantID, customerID)
+	return args.String(0), args.Error(1)
+}

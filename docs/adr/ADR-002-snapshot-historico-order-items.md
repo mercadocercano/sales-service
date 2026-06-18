@@ -1,3 +1,13 @@
+---
+adr: ADR-002
+status: accepted
+skills:
+  implement:
+    - dev/hexagonal-go
+  verify:
+    - dev/code-reviewer
+    - dev/postgres-data-modeling
+---
 # ADR-002: Snapshot histórico inmutable de producto y variante en order_items
 
 **Estado**: Aceptado

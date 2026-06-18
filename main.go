@@ -16,7 +16,8 @@ import (
 	salesCache "sales/src/sales/infrastructure/cache"
 	salesClient "sales/src/sales/infrastructure/client"
 	salesController "sales/src/sales/infrastructure/controller"
-	_ "sales/src/sales/infrastructure/metrics" // H8: Registra pos_sales_*, pos_sale_latency_ms, ttfs_seconds
+	salesLogging "sales/src/sales/infrastructure/logging" // ADR-001: logger canónico de eventos
+	_ "sales/src/sales/infrastructure/metrics"            // H8: Registra pos_sales_*, pos_sale_latency_ms, ttfs_seconds
 	salesPersistence "sales/src/sales/infrastructure/persistence"
 	sharedConfig "sales/src/shared/infrastructure/config"
 
@@ -73,8 +74,16 @@ func main() {
 	// Agregar middlewares básicos necesarios
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
+	salesNamespace := os.Getenv("SERVICE_NAMESPACE")
+	if salesNamespace == "" {
+		salesNamespace = "mc"
+	}
 	router.Use(tenantmw.TenantValidation(tenantmw.TenantValidationConfig{
 		JWTSecret: os.Getenv("JWT_SECRET"),
+		// sales maneja dinero (caja/POS): se valida namespace y se CIERRA el bypass de
+		// tenant (sin tenant_id ⇒ 403). Prerequisito de seguridad de la caja (ADR-003).
+		Namespace:           salesNamespace,
+		RejectMissingTenant: true,
 		ExcludedRoutes: []string{
 			"/health",
 			"/api/v1/health",
@@ -245,14 +254,23 @@ func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 	reserveStockUC := salesUseCase.NewReserveStockUseCase(stockAdapter)
 	releaseStockUC := salesUseCase.NewReleaseStockUseCase(stockAdapter)
 
+	// ADR-001: logger canónico de eventos de ventas (una línea JSON por evento a stdout)
+	salesEventLogger := salesLogging.NewSalesLogger("sales")
+
 	// POS Sale UseCase
 	var posSaleUC *salesUseCase.POSSaleUseCase
 	var listPosSalesUC *salesUseCase.ListPosSalesUseCase
+	var getPosSaleUC *salesUseCase.GetPosSaleUseCase
+	var generatePosSalePdfUC *salesUseCase.GeneratePosSalePdfUseCase
 	if posSaleRepo != nil {
-		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockAdapter, posSaleRepo, tenantMetricsRepo, paymentMethodAdapter, publishUseCase, customerAdapter, tenantAdapter)
+		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockAdapter, posSaleRepo, tenantMetricsRepo, paymentMethodAdapter, publishUseCase, customerAdapter, tenantAdapter, salesEventLogger)
 		listPosSalesUC = salesUseCase.NewListPosSalesUseCase(posSaleRepo)
+		getPosSaleUC = salesUseCase.NewGetPosSaleUseCase(posSaleRepo, paymentMethodAdapter, customerAdapter) // E18 Tramo B
+		// E18 Tramo C: comprobante PDF A4 (reusa el detalle + nombre del comercio)
+		posReceiptRenderer := salesAdapter.NewGofpdfPosReceiptRenderer()
+		generatePosSalePdfUC = salesUseCase.NewGeneratePosSalePdfUseCase(getPosSaleUC, tenantAdapter, posReceiptRenderer)
 	} else {
-		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockAdapter, nil, nil, paymentMethodAdapter, publishUseCase, customerAdapter, tenantAdapter)
+		posSaleUC = salesUseCase.NewPOSSaleUseCase(stockAdapter, nil, nil, paymentMethodAdapter, publishUseCase, customerAdapter, tenantAdapter, salesEventLogger)
 	}
 
 	var createOrderUC *salesUseCase.CreateOrderUseCase
@@ -282,7 +300,7 @@ func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 	}
 
 	// Crear controladores
-	salesCtrl := salesController.NewOrderController(validateStockUC, reserveStockUC, releaseStockUC, createOrderUC, confirmOrderUC, cancelOrderUC, listOrdersUC, getOrderUC, getOrderFinancialUC, posSaleUC, listPosSalesUC, registerPaymentUC, applyCustomerCreditUC)
+	salesCtrl := salesController.NewOrderController(validateStockUC, reserveStockUC, releaseStockUC, createOrderUC, confirmOrderUC, cancelOrderUC, listOrdersUC, getOrderUC, getOrderFinancialUC, posSaleUC, listPosSalesUC, getPosSaleUC, generatePosSalePdfUC, registerPaymentUC, applyCustomerCreditUC)
 
 	// HITO C - Report Controller (daily + open-orders + aging + customer-balance)
 	dailyReportRepo := salesPersistence.NewDailyReportPostgresRepository(db)

@@ -21,6 +21,7 @@ type PosSale struct {
 	AmountPaid      decimal.Decimal `json:"amount_paid"`       // Monto pagado por el cliente
 	Change          decimal.Decimal `json:"change"`            // Vuelto (amount_paid - final_amount)
 	Currency        string          `json:"currency"`
+	SaleNumber      *int            `json:"sale_number"` // E18 Tramo B: número de comprobante INTERNO (no fiscal). nil hasta persistir.
 	CreatedAt       time.Time       `json:"created_at"`
 	Items           []PosSaleItem   `json:"items"` // DDD: Collection of entities
 }

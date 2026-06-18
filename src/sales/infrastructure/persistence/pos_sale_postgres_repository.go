@@ -35,15 +35,26 @@ func (r *PosSalePostgresRepository) Create(ctx context.Context, sale *entity.Pos
 	}
 	defer tx.Rollback()
 
+	// 0. E18 Tramo B: asignar número de comprobante INTERNO (no fiscal) de forma
+	// atómica con la creación de la venta. El número se toma de document_sequences
+	// (POS_SALE) con SELECT ... FOR UPDATE dentro de ESTA transacción: si el INSERT
+	// de pos_sales falla, el rollback revierte también el incremento de la secuencia,
+	// evitando saltos. El lock de fila serializa a los concurrentes del mismo tenant.
+	saleNumber, err := r.nextPosSaleNumberTx(ctx, tx, sale.TenantID)
+	if err != nil {
+		return fmt.Errorf("error assigning sale_number: %w", err)
+	}
+	sale.SaleNumber = &saleNumber
+
 	// 1. Insertar pos_sale (aggregate root)
 	// HITO: POST /pos/sale devuelve DTO listo para imprimir
 	querySale := `
 		INSERT INTO pos_sales (
 			id, tenant_id, customer_id, payment_method_id,
 			total_amount, discount_amount, final_amount,
-			amount_paid, change, currency, created_at
+			amount_paid, change, currency, sale_number, created_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 		)
 	`
 
@@ -58,6 +69,7 @@ func (r *PosSalePostgresRepository) Create(ctx context.Context, sale *entity.Pos
 		sale.AmountPaid,
 		sale.Change,
 		sale.Currency,
+		saleNumber,
 		sale.CreatedAt,
 	)
 
@@ -98,6 +110,131 @@ func (r *PosSalePostgresRepository) Create(ctx context.Context, sale *entity.Pos
 	}
 
 	return nil
+}
+
+// nextPosSaleNumberTx asigna el siguiente número correlativo de comprobante POS
+// para el tenant, DENTRO de la transacción recibida.
+//
+// Concurrencia/atomicidad (E18 Tramo B):
+//   - Asegura la fila de secuencia con INSERT ... ON CONFLICT DO NOTHING. No es un
+//     UPSERT defensivo de negocio: la fila es un contador y su valor inicial 0 es
+//     semánticamente correcto para un tenant que aún no emitió comprobantes.
+//   - Toma la fila con SELECT ... FOR UPDATE: serializa a los concurrentes del mismo
+//     tenant/document_type. El segundo espera hasta que el primero haga COMMIT/ROLLBACK.
+//   - Incrementa con un único UPDATE ... RETURNING dentro de la misma tx, de modo que
+//     el número y la venta se confirman o se revierten juntos (sin saltos por fallo).
+func (r *PosSalePostgresRepository) nextPosSaleNumberTx(ctx context.Context, tx *sql.Tx, tenantID uuid.UUID) (int, error) {
+	const documentType = "POS_SALE"
+
+	// Garantizar la existencia de la fila de secuencia para este tenant.
+	ensure := `
+		INSERT INTO document_sequences (id, tenant_id, document_type, current_number, version, updated_at)
+		VALUES (gen_random_uuid(), $1, $2, 0, 1, NOW())
+		ON CONFLICT DO NOTHING
+	`
+	if _, err := tx.ExecContext(ctx, ensure, tenantID, documentType); err != nil {
+		return 0, fmt.Errorf("error ensuring sequence row: %w", err)
+	}
+
+	// Bloquear la fila y leer el número actual (serializa concurrentes del mismo tenant).
+	lock := `
+		SELECT current_number
+		FROM document_sequences
+		WHERE tenant_id = $1 AND document_type = $2
+		FOR UPDATE
+	`
+	var current int
+	if err := tx.QueryRowContext(ctx, lock, tenantID, documentType).Scan(&current); err != nil {
+		return 0, fmt.Errorf("error locking sequence row: %w", err)
+	}
+
+	// Incrementar atómicamente y devolver el nuevo número.
+	next := current + 1
+	upd := `
+		UPDATE document_sequences
+		SET current_number = $1, version = version + 1, updated_at = NOW()
+		WHERE tenant_id = $2 AND document_type = $3
+	`
+	if _, err := tx.ExecContext(ctx, upd, next, tenantID, documentType); err != nil {
+		return 0, fmt.Errorf("error incrementing sequence: %w", err)
+	}
+
+	return next, nil
+}
+
+// GetByID retorna el detalle completo de una venta POS del tenant (con items).
+// E18 Tramo B: el filtro por tenant_id va en el WHERE — una venta de otro tenant
+// devuelve ErrPosSaleNotFound (no se distingue de inexistente para no filtrar info).
+func (r *PosSalePostgresRepository) GetByID(ctx context.Context, tenantID, saleID uuid.UUID) (*entity.PosSale, error) {
+	querySale := `
+		SELECT
+			id, tenant_id, customer_id, payment_method_id,
+			total_amount, discount_amount, final_amount,
+			amount_paid, change, currency, sale_number, created_at
+		FROM pos_sales
+		WHERE id = $1 AND tenant_id = $2
+	`
+
+	sale := &entity.PosSale{}
+	err := r.db.QueryRowContext(ctx, querySale, saleID, tenantID).Scan(
+		&sale.ID,
+		&sale.TenantID,
+		&sale.CustomerID,
+		&sale.PaymentMethodID,
+		&sale.TotalAmount,
+		&sale.DiscountAmount,
+		&sale.FinalAmount,
+		&sale.AmountPaid,
+		&sale.Change,
+		&sale.Currency,
+		&sale.SaleNumber,
+		&sale.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, entity.ErrPosSaleNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("error querying pos_sale: %w", err)
+	}
+
+	// Cargar items del aggregate
+	queryItems := `
+		SELECT
+			id, pos_sale_id, sku, product_name,
+			quantity, unit_price, subtotal, stock_entry_id
+		FROM pos_sale_items
+		WHERE pos_sale_id = $1
+		ORDER BY created_at
+	`
+	rows, err := r.db.QueryContext(ctx, queryItems, sale.ID)
+	if err != nil {
+		return nil, fmt.Errorf("error querying pos_sale_items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []entity.PosSaleItem
+	for rows.Next() {
+		item := entity.PosSaleItem{}
+		if err := rows.Scan(
+			&item.ID,
+			&item.PosSaleID,
+			&item.SKU,
+			&item.ProductName,
+			&item.Quantity,
+			&item.UnitPrice,
+			&item.Subtotal,
+			&item.StockEntryID,
+		); err != nil {
+			return nil, fmt.Errorf("error scanning pos_sale_item: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating pos_sale_items: %w", err)
+	}
+	sale.Items = items
+
+	return sale, nil
 }
 
 // ListByTenant retorna todas las ventas POS de un tenant CON sus items

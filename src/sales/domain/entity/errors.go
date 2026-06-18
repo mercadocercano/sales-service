@@ -23,4 +23,7 @@ var (
 	ErrInsufficientPayment = errors.New("amount_paid must be greater than or equal to final_amount")
 
 	ErrPaymentMethodRequired = errors.New("payment_method_id is required")
+
+	// E18 Tramo B - Detalle de comprobante POS
+	ErrPosSaleNotFound = errors.New("pos_sale not found")
 )

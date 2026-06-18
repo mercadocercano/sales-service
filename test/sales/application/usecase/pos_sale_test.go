@@ -62,6 +62,7 @@ func setupPOSSaleUseCase(
 		eventPublisher,
 		customerPort,
 		nil, // tenantPort — not needed for core business logic tests
+		nil, // logger — nil-safe (eventos canónicos omitidos en estos tests)
 	)
 }
 

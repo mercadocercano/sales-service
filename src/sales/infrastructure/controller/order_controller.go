@@ -30,6 +30,8 @@ type OrderController struct {
 	getOrderFinancialUC   *usecase.GetOrderFinancialUseCase
 	posSaleUC             *usecase.POSSaleUseCase
 	listPosSalesUC        *usecase.ListPosSalesUseCase
+	getPosSaleUC          *usecase.GetPosSaleUseCase
+	generatePosSalePdfUC  *usecase.GeneratePosSalePdfUseCase
 	registerPaymentUC     *usecase.RegisterPaymentUseCase
 	applyCustomerCreditUC *usecase.ApplyCustomerCreditUseCase
 }
@@ -47,6 +49,8 @@ func NewOrderController(
 	getOrderFinancialUC *usecase.GetOrderFinancialUseCase,
 	posSaleUC *usecase.POSSaleUseCase,
 	listPosSalesUC *usecase.ListPosSalesUseCase,
+	getPosSaleUC *usecase.GetPosSaleUseCase,
+	generatePosSalePdfUC *usecase.GeneratePosSalePdfUseCase,
 	registerPaymentUC *usecase.RegisterPaymentUseCase,
 	applyCustomerCreditUC *usecase.ApplyCustomerCreditUseCase,
 ) *OrderController {
@@ -62,6 +66,8 @@ func NewOrderController(
 		getOrderFinancialUC:   getOrderFinancialUC,
 		posSaleUC:             posSaleUC,
 		listPosSalesUC:        listPosSalesUC,
+		getPosSaleUC:          getPosSaleUC,
+		generatePosSalePdfUC:  generatePosSalePdfUC,
 		registerPaymentUC:     registerPaymentUC,
 		applyCustomerCreditUC: applyCustomerCreditUC,
 	}
@@ -93,6 +99,8 @@ func (c *OrderController) RegisterRoutes(router *gin.RouterGroup) {
 		{
 			pos.POST("", c.POSSale)
 			pos.GET("", c.ListPosSales)
+			pos.GET("/:id", c.GetPosSale)        // E18 Tramo B: detalle de comprobante
+			pos.GET("/:id/pdf", c.GetPosSalePdf) // E18 Tramo C: comprobante PDF A4
 		}
 	}
 
@@ -141,6 +149,88 @@ func (c *OrderController) ListPosSales(ctx *gin.Context) {
 		"items":       items,
 		"total_count": len(items),
 	})
+}
+
+// GetPosSale devuelve el detalle completo de una venta POS (comprobante).
+// E18 Tramo B: respeta multi-tenancy — una venta de otro tenant responde 404.
+func (c *OrderController) GetPosSale(ctx *gin.Context) {
+	if c.getPosSaleUC == nil {
+		httpresp.JSON(ctx, http.StatusServiceUnavailable, "POS sale detail not available (database not configured)")
+		return
+	}
+
+	tenantID := ctx.GetHeader("X-Tenant-ID")
+	if tenantID == "" {
+		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		return
+	}
+
+	saleID := ctx.Param("id")
+	if saleID == "" {
+		httpresp.JSON(ctx, http.StatusBadRequest, "sale id is required")
+		return
+	}
+
+	resp, err := c.getPosSaleUC.Execute(ctx.Request.Context(), tenantID, saleID)
+	if err != nil {
+		// No encontrada o de otro tenant → 404 (no se distingue para no filtrar info)
+		if err == entity.ErrPosSaleNotFound {
+			httpresp.JSON(ctx, http.StatusNotFound, "POS sale not found")
+			return
+		}
+		// IDs malformados → 400
+		if contains(err.Error(), "invalid tenant_id") || contains(err.Error(), "invalid sale id") {
+			httpresp.JSONWithDetails(ctx, http.StatusBadRequest, "Invalid request", err.Error())
+			return
+		}
+		log.Printf("Error getting POS sale detail: %v", err)
+		httpresp.JSONWithDetails(ctx, http.StatusInternalServerError, "Error getting POS sale detail", err.Error())
+		return
+	}
+
+	ctx.JSON(http.StatusOK, resp)
+}
+
+// GetPosSalePdf devuelve el comprobante de una venta POS como PDF A4.
+// E18 Tramo C: respeta multi-tenancy — una venta de otro tenant responde 404.
+func (c *OrderController) GetPosSalePdf(ctx *gin.Context) {
+	if c.generatePosSalePdfUC == nil {
+		httpresp.JSON(ctx, http.StatusServiceUnavailable, "POS sale PDF not available (database not configured)")
+		return
+	}
+
+	tenantID := ctx.GetHeader("X-Tenant-ID")
+	if tenantID == "" {
+		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		return
+	}
+
+	saleID := ctx.Param("id")
+	if saleID == "" {
+		httpresp.JSON(ctx, http.StatusBadRequest, "sale id is required")
+		return
+	}
+
+	pdfBytes, err := c.generatePosSalePdfUC.Execute(ctx.Request.Context(), tenantID, saleID)
+	if err != nil {
+		// No encontrada o de otro tenant → 404 (no se distingue para no filtrar info)
+		if err == entity.ErrPosSaleNotFound {
+			httpresp.JSON(ctx, http.StatusNotFound, "POS sale not found")
+			return
+		}
+		// IDs malformados → 400
+		if contains(err.Error(), "invalid tenant_id") || contains(err.Error(), "invalid sale id") {
+			httpresp.JSONWithDetails(ctx, http.StatusBadRequest, "Invalid request", err.Error())
+			return
+		}
+		log.Printf("Error generating POS sale PDF: %v", err)
+		httpresp.JSONWithDetails(ctx, http.StatusInternalServerError, "Error generating POS sale PDF", err.Error())
+		return
+	}
+
+	filename := fmt.Sprintf("comprobante-%s.pdf", saleID)
+	ctx.Header("Content-Disposition", fmt.Sprintf("inline; filename=%q", filename))
+	ctx.Data(http.StatusOK, "application/pdf", pdfBytes)
 }
 
 // CancelOrder maneja la cancelación de una orden confirmada
@@ -546,20 +636,43 @@ func (c *OrderController) POSSale(ctx *gin.Context) {
 		metrics.POSSalesFailed.Inc()
 		log.Printf("Error processing POS sale: %v", err)
 
+		// Mapeo de errores de negocio a códigos 4xx. El 502 queda reservado
+		// SOLO para fallos reales de downstream/persistencia (Bad Gateway),
+		// para que el front pueda distinguir una regla de negocio de una caída.
+		msg := err.Error()
+		switch {
 		// HITO v0.6: Error de customer no encontrado → 404
-		if contains(err.Error(), "customer_not_found") {
+		case contains(msg, "customer_not_found"):
 			httpresp.JSON(ctx, http.StatusNotFound, "Customer not found")
-			return
-		}
 
-		// Si es error de stock insuficiente → 409
-		if contains(err.Error(), "insufficient_stock") {
-			httpresp.JSON(ctx, http.StatusConflict, "Insufficient stock for POS sale")
-			return
-		}
+		// Método de pago inválido (p. ej. el front manda "efectivo" en vez de "cash") → 400
+		case contains(msg, "payment_method_not_found"):
+			httpresp.JSONWithDetails(ctx, http.StatusBadRequest, "Invalid payment method", msg)
 
-		// Otros errores → 502
-		httpresp.JSONWithDetails(ctx, http.StatusBadGateway, "Error processing POS sale", err.Error())
+		// Stock insuficiente, no inicializado o rechazado por stock-service → 409
+		// (se chequea antes que las validaciones genéricas para no confundir
+		// "stock rejected: ..." con un error de input)
+		case contains(msg, "insufficient_stock"),
+			contains(msg, "stock rejected"):
+			httpresp.JSONWithDetails(ctx, http.StatusConflict, "Stock unavailable for POS sale", msg)
+
+		// Validaciones de input / reglas de dominio del request → 400.
+		// Cubre todas las validaciones del use case y de las entidades POS:
+		// "*_id is required", "amount_paid must be greater than 0",
+		// "quantity/price must be greater than...", "at least one item", etc.
+		case contains(msg, "is required"),
+			contains(msg, "must be greater"),
+			contains(msg, "must be at least"),
+			contains(msg, "must be positive"),
+			contains(msg, "amount_paid"),
+			contains(msg, "at least one item"),
+			contains(msg, "invalid tenant_id"):
+			httpresp.JSONWithDetails(ctx, http.StatusBadRequest, "Invalid request", msg)
+
+		// Fallos reales de downstream / persistencia → 502
+		default:
+			httpresp.JSONWithDetails(ctx, http.StatusBadGateway, "Error processing POS sale", msg)
+		}
 		return
 	}
 

@@ -22,13 +22,14 @@ import (
 // HITO v0.6: Ahora valida customer_id contra customer-service
 // H8: TenantClient + tenant_metrics para TTFS (evita duplicado si se borran ventas)
 type POSSaleUseCase struct {
-	stockPort          port.StockPort
-	posSaleRepo        port.PosSaleRepository
-	tenantMetricsRepo  port.TenantMetricsRepository
-	paymentMethodPort  port.PaymentMethodPort
-	eventPublisher     port.EventPublisher
-	customerPort       port.CustomerPort
-	tenantPort         port.TenantPort
+	stockPort         port.StockPort
+	posSaleRepo       port.PosSaleRepository
+	tenantMetricsRepo port.TenantMetricsRepository
+	paymentMethodPort port.PaymentMethodPort
+	eventPublisher    port.EventPublisher
+	customerPort      port.CustomerPort
+	tenantPort        port.TenantPort
+	logger            port.SalesEventLogger
 }
 
 // NewPOSSaleUseCase crea una nueva instancia del caso de uso
@@ -40,6 +41,7 @@ func NewPOSSaleUseCase(
 	eventPublisher port.EventPublisher,
 	customerPort port.CustomerPort,
 	tenantPort port.TenantPort,
+	logger port.SalesEventLogger,
 ) *POSSaleUseCase {
 	return &POSSaleUseCase{
 		stockPort:         stockPort,
@@ -49,6 +51,14 @@ func NewPOSSaleUseCase(
 		eventPublisher:    eventPublisher,
 		customerPort:      customerPort,
 		tenantPort:        tenantPort,
+		logger:            logger,
+	}
+}
+
+// logEvent emite un evento canónico si hay logger inyectado (nil-safe).
+func (uc *POSSaleUseCase) logEvent(e port.SalesEvent) {
+	if uc.logger != nil {
+		uc.logger.Log(e)
 	}
 }
 
@@ -73,6 +83,7 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest, 
 	// Resolver payment_method_id: acepta UUID o código ("cash", "efectivo")
 	resolvedPaymentMethodID, err := resolvePaymentMethodID(req.PaymentMethodID, uc.paymentMethodPort)
 	if err != nil {
+		uc.logEvent(port.SalesEvent{Event: "orders.pos_sale_failed", TenantID: tenantID, PaymentMethod: req.PaymentMethodID, Reason: err.Error()})
 		return nil, err
 	}
 	if len(req.Items) == 0 {
@@ -157,6 +168,7 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest, 
 		if !saleResp.Success {
 			// Error de negocio (stock insuficiente, no inicializado, etc.)
 			log.Printf("❌ Stock rejected for SKU %s: %s", itemReq.SKU, saleResp.Message)
+			uc.logEvent(port.SalesEvent{Event: "orders.pos_sale_failed", TenantID: tenantID, SKU: itemReq.SKU, Reason: saleResp.Message})
 			uc.compensateProcessedStock(tenantID, processedStockEntries, "insufficient_stock", authToken)
 			return nil, fmt.Errorf("stock rejected for SKU %s: %s", itemReq.SKU, saleResp.Message)
 		}
@@ -224,11 +236,19 @@ func (uc *POSSaleUseCase) Execute(tenantID string, req *request.POSSaleRequest, 
 		if err != nil {
 			// CRÍTICO: Stock ya fue descontado, debemos revertirlo
 			log.Printf("⚠️ CRITICAL: Stock consumed but pos_sale persistence failed: %v", err)
+			uc.logEvent(port.SalesEvent{Event: "orders.pos_sale_persist_failed", TenantID: tenantID, Items: len(posSale.Items), Reason: err.Error()})
 			uc.compensateProcessedStock(tenantID, processedStockEntries, "pos_sale_persistence_failed", authToken)
 			return nil, fmt.Errorf("error saving pos_sale (stock compensated): %w", err)
 		}
 
 		log.Printf("✅ PosSale created: ID=%s, Items=%d, FinalAmount=%s", posSale.ID, posSale.TotalItems(), posSale.FinalAmount)
+		uc.logEvent(port.SalesEvent{
+			Event:       "orders.pos_sale_completed",
+			TenantID:    tenantID,
+			SaleID:      posSale.ID.String(),
+			Items:       posSale.TotalItems(),
+			FinalAmount: posSale.FinalAmount.String(),
+		})
 
 		// S001: métricas de negocio para metrics-gateway KPIs
 		paymentMethodName := "unknown"
