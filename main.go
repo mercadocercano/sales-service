@@ -25,6 +25,7 @@ import (
 	"github.com/hornosg/go-shared/infrastructure/env"
 	tenantmw "github.com/hornosg/go-shared/infrastructure/middleware"
 	"github.com/hornosg/go-shared/infrastructure/postgres"
+	sharedmigrate "github.com/hornosg/go-shared/migrate"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/mercadocercano/eventbus"
@@ -129,6 +130,14 @@ func main() {
 	}, "order_db", maxRetries)
 	if db != nil {
 		defer db.Close()
+	}
+
+	// Migraciones versionadas in-app (ADR-001) — fail-fast antes de servir tráfico.
+	// Corren contra order_db (el pool `db`) apenas se establece la conexión.
+	if db != nil {
+		if err := sharedmigrate.RunMigrations(db, MigrationsFS, dbName); err != nil {
+			log.Fatalf("Error running migrations: %v", err)
+		}
 	}
 
 	// Conectar a payment_method_db con retry
