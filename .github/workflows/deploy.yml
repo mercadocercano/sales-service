@@ -56,6 +56,8 @@ jobs:
           sbom: false
           build-args: |
             GITHUB_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }}
+          secrets: |
+            github_token=${{ secrets.GO_PRIVATE_TOKEN }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
