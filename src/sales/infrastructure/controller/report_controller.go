@@ -75,9 +75,9 @@ func (c *ReportController) DailyReport(ctx *gin.Context) {
 	// ========================================================================
 	// PASO 1: Validar header X-Tenant-ID (OBLIGATORIO)
 	// ========================================================================
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		response.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		response.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -129,9 +129,9 @@ func (c *ReportController) GetOpenOrdersReport(ctx *gin.Context) {
 	start := time.Now()
 	defer func() { reportOpenOrdersDuration.Observe(time.Since(start).Seconds()) }()
 
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		response.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		response.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -169,9 +169,9 @@ func (c *ReportController) GetOpenOrdersReport(ctx *gin.Context) {
 // Query: customer_id (obligatorio), aging_bucket (0_30|31_60|61_90|90_plus), page, page_size (default 20, máx 100), sort
 // summary y aging siempre completos; open_orders paginado y filtrado por aging_bucket si se envía.
 func (c *ReportController) GetCustomerBalanceReport(ctx *gin.Context) {
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		response.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		response.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 	customerID := ctx.Query("customer_id")
@@ -214,9 +214,9 @@ func (c *ReportController) GetAgingReport(ctx *gin.Context) {
 	start := time.Now()
 	defer func() { reportAgingDuration.Observe(time.Since(start).Seconds()) }()
 
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		response.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		response.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 

@@ -126,9 +126,9 @@ func (c *OrderController) ListPosSales(ctx *gin.Context) {
 		return
 	}
 
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -159,9 +159,9 @@ func (c *OrderController) GetPosSale(ctx *gin.Context) {
 		return
 	}
 
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -199,9 +199,9 @@ func (c *OrderController) GetPosSalePdf(ctx *gin.Context) {
 		return
 	}
 
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -242,9 +242,9 @@ func (c *OrderController) CancelOrder(ctx *gin.Context) {
 	}
 
 	// 1. Validar header X-Tenant-ID (OBLIGATORIO)
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -291,9 +291,9 @@ func (c *OrderController) ConfirmOrder(ctx *gin.Context) {
 	}
 
 	// 1. Validar header X-Tenant-ID (OBLIGATORIO)
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -351,9 +351,9 @@ func (c *OrderController) CreateOrder(ctx *gin.Context) {
 	}
 
 	// 1. Validar header X-Tenant-ID (OBLIGATORIO)
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -387,9 +387,9 @@ func (c *OrderController) CreateOrder(ctx *gin.Context) {
 // ReleaseStock maneja la liberación de stock reservado
 func (c *OrderController) ReleaseStock(ctx *gin.Context) {
 	// 1. Validar header X-Tenant-ID (OBLIGATORIO)
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -423,9 +423,9 @@ func (c *OrderController) ReleaseStock(ctx *gin.Context) {
 // ReserveStock maneja la reserva de stock para una orden
 func (c *OrderController) ReserveStock(ctx *gin.Context) {
 	// 1. Validar header X-Tenant-ID (OBLIGATORIO)
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -475,9 +475,9 @@ func (c *OrderController) ListOrders(ctx *gin.Context) {
 	}
 
 	// 1. Validar header X-Tenant-ID (OBLIGATORIO)
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -533,9 +533,9 @@ func (c *OrderController) GetOrder(ctx *gin.Context) {
 	}
 
 	// 1. Validar header X-Tenant-ID (OBLIGATORIO)
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -572,9 +572,9 @@ func (c *OrderController) GetOrderFinancial(ctx *gin.Context) {
 		httpresp.JSON(ctx, http.StatusServiceUnavailable, "Order financial view not available (database not configured)")
 		return
 	}
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 	orderID := ctx.Param("order_id")
@@ -611,10 +611,10 @@ func (c *OrderController) POSSale(ctx *gin.Context) {
 	metrics.POSSalesTotal.Inc()
 
 	// 1. Validar header X-Tenant-ID (OBLIGATORIO)
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
 		metrics.POSSalesFailed.Inc()
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -684,9 +684,9 @@ func (c *OrderController) POSSale(ctx *gin.Context) {
 // ValidateStock maneja la validación de stock para items de orden
 func (c *OrderController) ValidateStock(ctx *gin.Context) {
 	// 1. Validar header X-Tenant-ID (OBLIGATORIO)
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -725,9 +725,9 @@ func (c *OrderController) RegisterPayment(ctx *gin.Context) {
 	}
 
 	// 1. Validar header X-Tenant-ID (OBLIGATORIO)
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 
@@ -786,9 +786,9 @@ func (c *OrderController) ApplyCustomerCredit(ctx *gin.Context) {
 		httpresp.JSON(ctx, http.StatusServiceUnavailable, "Apply credit not available")
 		return
 	}
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 	orderID := ctx.Param("order_id")

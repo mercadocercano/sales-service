@@ -42,9 +42,9 @@ func (c *CustomerController) CreateCredit(ctx *gin.Context) {
 		httpresp.JSON(ctx, http.StatusServiceUnavailable, "Create credit not available (database or eventbus not configured)")
 		return
 	}
-	tenantID := ctx.GetHeader("X-Tenant-ID")
+	tenantID := ctx.GetString("tenant_id")
 	if tenantID == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return
 	}
 	customerID := ctx.Param("customer_id")

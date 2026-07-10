@@ -10,6 +10,8 @@ import (
 	"github.com/lib/pq"
 	"github.com/shopspring/decimal"
 
+	"github.com/hornosg/go-shared/infrastructure/postgres"
+
 	"sales/src/sales/domain/entity"
 	"sales/src/sales/domain/port"
 	"sales/src/sales/domain/value_object"
@@ -82,65 +84,87 @@ func scanCashSession(row rowScanner) (*entity.CashRegisterSession, error) {
 
 // OpenSession inserta la sesión + asiento de auditoría 'opened' en una transacción.
 func (r *CashRegisterPostgresRepository) OpenSession(ctx context.Context, s *entity.CashRegisterSession) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("error starting tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	const q = `
-		INSERT INTO cash_register_sessions
-			(id, tenant_id, point_of_sale_id, status, opened_by, opening_amount, opened_at,
-			 review_threshold, version, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`
-	_, err = tx.ExecContext(ctx, q,
-		s.ID, s.TenantID, s.PointOfSaleID, s.Status.String(), s.OpenedBy, s.OpeningAmount, s.OpenedAt,
-		s.ReviewThreshold, s.Version, s.CreatedAt, s.UpdatedAt,
-	)
-	if err != nil {
-		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
-			return entity.ErrCashSessionAlreadyOpen
+	rc := postgres.RLSContext{TenantID: s.TenantID.String()}
+	return postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		const q = `
+			INSERT INTO cash_register_sessions
+				(id, tenant_id, point_of_sale_id, status, opened_by, opening_amount, opened_at,
+				 review_threshold, version, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`
+		_, err := tx.ExecContext(ctx, q,
+			s.ID, s.TenantID, s.PointOfSaleID, s.Status.String(), s.OpenedBy, s.OpeningAmount, s.OpenedAt,
+			s.ReviewThreshold, s.Version, s.CreatedAt, s.UpdatedAt,
+		)
+		if err != nil {
+			var pqErr *pq.Error
+			if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+				return entity.ErrCashSessionAlreadyOpen
+			}
+			return fmt.Errorf("error inserting cash session: %w", err)
 		}
-		return fmt.Errorf("error inserting cash session: %w", err)
-	}
 
-	if err := insertAuditTx(ctx, tx, entity.CashAuditEntry{
-		TenantID: s.TenantID, SessionID: s.ID, Action: entity.CashAuditOpened,
-		UserID: s.OpenedBy, PointOfSaleID: s.PointOfSaleID, OpeningAmount: &s.OpeningAmount,
-	}); err != nil {
-		return err
-	}
-	return tx.Commit()
+		return insertAuditTx(ctx, tx, entity.CashAuditEntry{
+			TenantID: s.TenantID, SessionID: s.ID, Action: entity.CashAuditOpened,
+			UserID: s.OpenedBy, PointOfSaleID: s.PointOfSaleID, OpeningAmount: &s.OpeningAmount,
+		})
+	})
 }
 
 func (r *CashRegisterPostgresRepository) GetOpenByTerminal(ctx context.Context, tenantID uuid.UUID, pointOfSaleID string) (*entity.CashRegisterSession, error) {
-	q := `SELECT ` + cashSessionColumns + ` FROM cash_register_sessions
-		WHERE tenant_id = $1 AND point_of_sale_id = $2 AND status = 'open'`
-	s, err := scanCashSession(r.db.QueryRowContext(ctx, q, tenantID, pointOfSaleID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, entity.ErrCashSessionNotFound
-	}
+	rc := postgres.RLSContext{TenantID: tenantID.String()}
+	var s *entity.CashRegisterSession
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		q := `SELECT ` + cashSessionColumns + ` FROM cash_register_sessions
+			WHERE tenant_id = $1 AND point_of_sale_id = $2 AND status = 'open'`
+		var err error
+		s, err = scanCashSession(tx.QueryRowContext(ctx, q, tenantID, pointOfSaleID))
+		if errors.Is(err, sql.ErrNoRows) {
+			return entity.ErrCashSessionNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("error querying open session: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("error querying open session: %w", err)
+		return nil, err
 	}
 	return s, nil
 }
 
 func (r *CashRegisterPostgresRepository) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*entity.CashRegisterSession, error) {
-	q := `SELECT ` + cashSessionColumns + ` FROM cash_register_sessions WHERE id = $1 AND tenant_id = $2`
-	s, err := scanCashSession(r.db.QueryRowContext(ctx, q, id, tenantID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, entity.ErrCashSessionNotFound
-	}
+	rc := postgres.RLSContext{TenantID: tenantID.String()}
+	var s *entity.CashRegisterSession
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		q := `SELECT ` + cashSessionColumns + ` FROM cash_register_sessions WHERE id = $1 AND tenant_id = $2`
+		var err error
+		s, err = scanCashSession(tx.QueryRowContext(ctx, q, id, tenantID))
+		if errors.Is(err, sql.ErrNoRows) {
+			return entity.ErrCashSessionNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("error querying session: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("error querying session: %w", err)
+		return nil, err
 	}
 	return s, nil
 }
 
 func (r *CashRegisterPostgresRepository) ComputeExpected(ctx context.Context, s *entity.CashRegisterSession, cashPaymentMethodID uuid.UUID) (decimal.Decimal, error) {
-	return computeExpected(ctx, r.db, s, cashPaymentMethodID)
+	rc := postgres.RLSContext{TenantID: s.TenantID.String()}
+	var expected decimal.Decimal
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		expected, err = computeExpected(ctx, tx, s, cashPaymentMethodID)
+		return err
+	})
+	if err != nil {
+		return decimal.Zero, err
+	}
+	return expected, nil
 }
 
 // computeExpected: opening + Σ(ventas efectivo final_amount) + Σ(ingresos) − Σ(egresos/retiros).
@@ -171,143 +195,131 @@ func computeExpected(ctx context.Context, q rowQueryer, s *entity.CashRegisterSe
 }
 
 func (r *CashRegisterPostgresRepository) RegisterMovement(ctx context.Context, mv *entity.CashMovement) (*entity.CashRegisterSession, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	rc := postgres.RLSContext{TenantID: mv.TenantID.String()}
+	var s *entity.CashRegisterSession
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		s, err = lockSessionTx(ctx, tx, mv.TenantID, mv.SessionID)
+		if err != nil {
+			return err
+		}
+		if !s.Status.IsOpen() {
+			return entity.ErrCashSessionNotOpen
+		}
+
+		const qIns = `
+			INSERT INTO cash_movements (id, tenant_id, cash_register_session_id, type, amount, reason, created_by, created_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`
+		if _, err := tx.ExecContext(ctx, qIns,
+			mv.ID, mv.TenantID, mv.SessionID, mv.Type.String(), mv.Amount, mv.Reason, mv.CreatedBy, mv.CreatedAt,
+		); err != nil {
+			return fmt.Errorf("error inserting movement: %w", err)
+		}
+
+		if err := bumpVersionTx(ctx, tx, s); err != nil {
+			return err
+		}
+
+		return insertAuditTx(ctx, tx, entity.CashAuditEntry{
+			TenantID: mv.TenantID, SessionID: mv.SessionID, Action: entity.CashAuditMovementRegistered,
+			UserID: mv.CreatedBy, PointOfSaleID: s.PointOfSaleID,
+			MovementType: mv.Type.String(), MovementAmount: &mv.Amount, Detail: mv.Reason,
+		})
+	})
 	if err != nil {
-		return nil, fmt.Errorf("error starting tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	s, err := lockSessionTx(ctx, tx, mv.TenantID, mv.SessionID)
-	if err != nil {
 		return nil, err
-	}
-	if !s.Status.IsOpen() {
-		return nil, entity.ErrCashSessionNotOpen
-	}
-
-	const qIns = `
-		INSERT INTO cash_movements (id, tenant_id, cash_register_session_id, type, amount, reason, created_by, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`
-	if _, err := tx.ExecContext(ctx, qIns,
-		mv.ID, mv.TenantID, mv.SessionID, mv.Type.String(), mv.Amount, mv.Reason, mv.CreatedBy, mv.CreatedAt,
-	); err != nil {
-		return nil, fmt.Errorf("error inserting movement: %w", err)
-	}
-
-	if err := bumpVersionTx(ctx, tx, s); err != nil {
-		return nil, err
-	}
-
-	if err := insertAuditTx(ctx, tx, entity.CashAuditEntry{
-		TenantID: mv.TenantID, SessionID: mv.SessionID, Action: entity.CashAuditMovementRegistered,
-		UserID: mv.CreatedBy, PointOfSaleID: s.PointOfSaleID,
-		MovementType: mv.Type.String(), MovementAmount: &mv.Amount, Detail: mv.Reason,
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("error committing movement: %w", err)
 	}
 	return s, nil
 }
 
 func (r *CashRegisterPostgresRepository) CloseSession(ctx context.Context, tenantID, sessionID, closedBy, cashPaymentMethodID uuid.UUID, counted decimal.Decimal) (*entity.CashRegisterSession, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("error starting tx: %w", err)
-	}
-	defer tx.Rollback()
+	rc := postgres.RLSContext{TenantID: tenantID.String()}
+	var s *entity.CashRegisterSession
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		s, err = lockSessionTx(ctx, tx, tenantID, sessionID)
+		if err != nil {
+			return err
+		}
 
-	s, err := lockSessionTx(ctx, tx, tenantID, sessionID)
+		expected, err := computeExpected(ctx, tx, s, cashPaymentMethodID)
+		if err != nil {
+			return err
+		}
+
+		// Regla de dominio: setea snapshot y decide closed vs pending_review por umbral.
+		if err := s.Close(closedBy, counted, expected); err != nil {
+			return err
+		}
+
+		const qUpd = `
+			UPDATE cash_register_sessions
+			SET status=$1, closed_by=$2, counted_amount=$3, expected_amount=$4, difference=$5,
+			    closed_at=$6, version=version+1, updated_at=NOW()
+			WHERE id=$7 AND tenant_id=$8 AND version=$9`
+		res, err := tx.ExecContext(ctx, qUpd,
+			s.Status.String(), s.ClosedBy, s.CountedAmount, s.ExpectedAmount, s.Difference,
+			s.ClosedAt, s.ID, s.TenantID, s.Version,
+		)
+		if err != nil {
+			return fmt.Errorf("error updating session on close: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return entity.ErrCashSessionConflict
+		}
+		s.Version++
+
+		return insertAuditTx(ctx, tx, entity.CashAuditEntry{
+			TenantID: s.TenantID, SessionID: s.ID, Action: entity.CashAuditClosed,
+			UserID: closedBy, PointOfSaleID: s.PointOfSaleID,
+			ExpectedAmount: s.ExpectedAmount, CountedAmount: s.CountedAmount, Difference: s.Difference,
+			Detail: "status=" + s.Status.String(),
+		})
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	expected, err := computeExpected(ctx, tx, s, cashPaymentMethodID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Regla de dominio: setea snapshot y decide closed vs pending_review por umbral.
-	if err := s.Close(closedBy, counted, expected); err != nil {
-		return nil, err
-	}
-
-	const qUpd = `
-		UPDATE cash_register_sessions
-		SET status=$1, closed_by=$2, counted_amount=$3, expected_amount=$4, difference=$5,
-		    closed_at=$6, version=version+1, updated_at=NOW()
-		WHERE id=$7 AND tenant_id=$8 AND version=$9`
-	res, err := tx.ExecContext(ctx, qUpd,
-		s.Status.String(), s.ClosedBy, s.CountedAmount, s.ExpectedAmount, s.Difference,
-		s.ClosedAt, s.ID, s.TenantID, s.Version,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("error updating session on close: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return nil, entity.ErrCashSessionConflict
-	}
-	s.Version++
-
-	if err := insertAuditTx(ctx, tx, entity.CashAuditEntry{
-		TenantID: s.TenantID, SessionID: s.ID, Action: entity.CashAuditClosed,
-		UserID: closedBy, PointOfSaleID: s.PointOfSaleID,
-		ExpectedAmount: s.ExpectedAmount, CountedAmount: s.CountedAmount, Difference: s.Difference,
-		Detail: "status=" + s.Status.String(),
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("error committing close: %w", err)
 	}
 	return s, nil
 }
 
 func (r *CashRegisterPostgresRepository) ApproveReview(ctx context.Context, tenantID, sessionID, approverID uuid.UUID) (*entity.CashRegisterSession, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("error starting tx: %w", err)
-	}
-	defer tx.Rollback()
+	rc := postgres.RLSContext{TenantID: tenantID.String()}
+	var s *entity.CashRegisterSession
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		s, err = lockSessionTx(ctx, tx, tenantID, sessionID)
+		if err != nil {
+			return err
+		}
 
-	s, err := lockSessionTx(ctx, tx, tenantID, sessionID)
+		// Regla de dominio: valida pending_review + separación de funciones (aprobador≠operador).
+		if err := s.ApproveReview(approverID); err != nil {
+			return err
+		}
+
+		const qUpd = `
+			UPDATE cash_register_sessions
+			SET status=$1, approved_by=$2, approved_at=$3, version=version+1, updated_at=NOW()
+			WHERE id=$4 AND tenant_id=$5 AND version=$6`
+		res, err := tx.ExecContext(ctx, qUpd,
+			s.Status.String(), s.ApprovedBy, s.ApprovedAt, s.ID, s.TenantID, s.Version,
+		)
+		if err != nil {
+			return fmt.Errorf("error updating session on approve: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return entity.ErrCashSessionConflict
+		}
+		s.Version++
+
+		return insertAuditTx(ctx, tx, entity.CashAuditEntry{
+			TenantID: s.TenantID, SessionID: s.ID, Action: entity.CashAuditReviewApproved,
+			UserID: approverID, PointOfSaleID: s.PointOfSaleID,
+			ExpectedAmount: s.ExpectedAmount, CountedAmount: s.CountedAmount, Difference: s.Difference,
+		})
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	// Regla de dominio: valida pending_review + separación de funciones (aprobador≠operador).
-	if err := s.ApproveReview(approverID); err != nil {
-		return nil, err
-	}
-
-	const qUpd = `
-		UPDATE cash_register_sessions
-		SET status=$1, approved_by=$2, approved_at=$3, version=version+1, updated_at=NOW()
-		WHERE id=$4 AND tenant_id=$5 AND version=$6`
-	res, err := tx.ExecContext(ctx, qUpd,
-		s.Status.String(), s.ApprovedBy, s.ApprovedAt, s.ID, s.TenantID, s.Version,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("error updating session on approve: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return nil, entity.ErrCashSessionConflict
-	}
-	s.Version++
-
-	if err := insertAuditTx(ctx, tx, entity.CashAuditEntry{
-		TenantID: s.TenantID, SessionID: s.ID, Action: entity.CashAuditReviewApproved,
-		UserID: approverID, PointOfSaleID: s.PointOfSaleID,
-		ExpectedAmount: s.ExpectedAmount, CountedAmount: s.CountedAmount, Difference: s.Difference,
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("error committing approve: %w", err)
 	}
 	return s, nil
 }

@@ -49,3 +49,6 @@ tmp/
 # Engram
 .engram/engram.db
 .engram/*.db-*
+
+# DB backups (pg_dump antes de migraciones contra lab-postgres, ver PLAT-E25 T3)
+.backups/

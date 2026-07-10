@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/hornosg/go-shared/infrastructure/postgres"
+
 	"sales/src/sales/domain/port"
 )
 
@@ -70,47 +72,63 @@ const openOrdersSelect = `
 		  AND (so.total_amount - COALESCE(sp.total_paid, 0)) > 0`
 
 // GetOpenOrders devuelve órdenes abiertas con paginación, filtros opcionales (aging_bucket, customer_id) y orden.
+// PLAT-E25 T10: corre dentro de WithRLSInTransaction (SET LOCAL app.tenant_id) — el WHERE
+// tenant_id explícito se mantiene como defensa en profundidad (mismo criterio que T4-T9).
 func (r *ReportPostgresRepository) GetOpenOrders(
 	ctx context.Context,
 	tenantID string,
 	limit, offset int,
 	agingBucket, customerID, sort string,
 ) ([]port.OpenOrderRow, error) {
-	args := []interface{}{tenantID}
-	n := 1
-	customerClause := ""
-	if customerID != "" {
-		n++
-		customerClause = " AND so.customer_id = $" + strconv.Itoa(n)
-		args = append(args, customerID)
-	}
-	agingClause := agingConditionSQL(agingBucket)
-	args = append(args, limit, offset)
-	limitParam := n + 1
-	offsetParam := n + 2
-	query := openOrdersSelect + customerClause + agingClause +
-		" ORDER BY " + orderBySQL(sort) +
-		fmt.Sprintf(" LIMIT $%d OFFSET $%d", limitParam, offsetParam)
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rc := postgres.RLSContext{TenantID: tenantID}
+
+	var result []port.OpenOrderRow
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		args := []interface{}{tenantID}
+		n := 1
+		customerClause := ""
+		if customerID != "" {
+			n++
+			customerClause = " AND so.customer_id = $" + strconv.Itoa(n)
+			args = append(args, customerID)
+		}
+		agingClause := agingConditionSQL(agingBucket)
+		args = append(args, limit, offset)
+		limitParam := n + 1
+		offsetParam := n + 2
+		query := openOrdersSelect + customerClause + agingClause +
+			" ORDER BY " + orderBySQL(sort) +
+			fmt.Sprintf(" LIMIT $%d OFFSET $%d", limitParam, offsetParam)
+		rows, err := tx.QueryContext(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("get open orders: %w", err)
+		}
+		defer rows.Close()
+		result, err = scanOpenOrderRows(rows)
+		return err
+	})
 	if err != nil {
-		return nil, fmt.Errorf("get open orders: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
-	return scanOpenOrderRows(rows)
+	return result, nil
 }
 
 // GetOpenOrdersSummary devuelve resumen (filtrado por aging_bucket y customer_id si aplica).
 func (r *ReportPostgresRepository) GetOpenOrdersSummary(ctx context.Context, tenantID, agingBucket, customerID string) (*port.OpenOrdersSummary, error) {
-	args := []interface{}{tenantID}
-	n := 1
-	customerClause := ""
-	if customerID != "" {
-		n++
-		customerClause = " AND so.customer_id = $" + strconv.Itoa(n)
-		args = append(args, customerID)
-	}
-	agingClause := agingConditionSQL(agingBucket)
-	query := `
+	rc := postgres.RLSContext{TenantID: tenantID}
+
+	var s port.OpenOrdersSummary
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		args := []interface{}{tenantID}
+		n := 1
+		customerClause := ""
+		if customerID != "" {
+			n++
+			customerClause = " AND so.customer_id = $" + strconv.Itoa(n)
+			args = append(args, customerID)
+		}
+		agingClause := agingConditionSQL(agingBucket)
+		query := `
 		SELECT
 		    COUNT(so.id) AS total_open_orders,
 		    COALESCE(SUM(so.total_amount - COALESCE(sp.total_paid, 0)), 0) AS total_outstanding_amount
@@ -123,11 +141,11 @@ func (r *ReportPostgresRepository) GetOpenOrdersSummary(ctx context.Context, ten
 		WHERE so.tenant_id = $1
 		  AND so.status IN ('CREATED', 'CONFIRMED')
 		  AND (so.total_amount - COALESCE(sp.total_paid, 0)) > 0` + customerClause + agingClause
-	var s port.OpenOrdersSummary
-	err := r.db.QueryRowContext(ctx, query, args...).Scan(
-		&s.TotalOpenOrders,
-		&s.TotalOutstandingAmount,
-	)
+		return tx.QueryRowContext(ctx, query, args...).Scan(
+			&s.TotalOpenOrders,
+			&s.TotalOutstandingAmount,
+		)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("get open orders summary: %w", err)
 	}
@@ -136,7 +154,11 @@ func (r *ReportPostgresRepository) GetOpenOrdersSummary(ctx context.Context, ten
 
 // GetOpenOrdersBucketCounts devuelve conteos por bucket (sin filtrar) para badges en tabs.
 func (r *ReportPostgresRepository) GetOpenOrdersBucketCounts(ctx context.Context, tenantID string) (*port.BucketCounts, error) {
-	query := `
+	rc := postgres.RLSContext{TenantID: tenantID}
+
+	var c port.BucketCounts
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		query := `
 		WITH open AS (
 		    SELECT
 		        so.id,
@@ -158,13 +180,13 @@ func (r *ReportPostgresRepository) GetOpenOrdersBucketCounts(ctx context.Context
 		    COUNT(*) FILTER (WHERE days > 90) AS c_90_plus
 		FROM open
 	`
-	var c port.BucketCounts
-	err := r.db.QueryRowContext(ctx, query, tenantID).Scan(
-		&c.Bucket0_30,
-		&c.Bucket31_60,
-		&c.Bucket61_90,
-		&c.Bucket90Plus,
-	)
+		return tx.QueryRowContext(ctx, query, tenantID).Scan(
+			&c.Bucket0_30,
+			&c.Bucket31_60,
+			&c.Bucket61_90,
+			&c.Bucket90Plus,
+		)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("get open orders bucket counts: %w", err)
 	}
@@ -205,7 +227,11 @@ func scanOpenOrderRows(rows *sql.Rows) ([]port.OpenOrderRow, error) {
 
 // GetCustomerBalanceSummary devuelve resumen financiero de un cliente (solo órdenes abiertas).
 func (r *ReportPostgresRepository) GetCustomerBalanceSummary(ctx context.Context, tenantID, customerID string) (*port.CustomerBalanceSummary, error) {
-	query := `
+	rc := postgres.RLSContext{TenantID: tenantID}
+
+	var s port.CustomerBalanceSummary
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		query := `
 		SELECT
 		    COUNT(so.id) AS open_orders_count,
 		    COALESCE(SUM(so.total_amount - COALESCE(sp.total_paid, 0)), 0) AS total_outstanding,
@@ -227,30 +253,39 @@ func (r *ReportPostgresRepository) GetCustomerBalanceSummary(ctx context.Context
 		  AND so.status IN ('CREATED', 'CONFIRMED')
 		  AND (so.total_amount - COALESCE(sp.total_paid, 0)) > 0
 	`
-	var s port.CustomerBalanceSummary
-	var lastAt sql.NullTime
-	err := r.db.QueryRowContext(ctx, query, tenantID, customerID).Scan(
-		&s.OpenOrdersCount,
-		&s.TotalOutstanding,
-		&lastAt,
-		&s.OldestDebtDays,
-	)
-	if err == sql.ErrNoRows {
-		return &port.CustomerBalanceSummary{}, nil
-	}
+		var lastAt sql.NullTime
+		err := tx.QueryRowContext(ctx, query, tenantID, customerID).Scan(
+			&s.OpenOrdersCount,
+			&s.TotalOutstanding,
+			&lastAt,
+			&s.OldestDebtDays,
+		)
+		if err == sql.ErrNoRows {
+			s = port.CustomerBalanceSummary{}
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if lastAt.Valid {
+			t := lastAt.Time
+			s.LastPaymentAt = &t
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("get customer balance summary: %w", err)
-	}
-	if lastAt.Valid {
-		t := lastAt.Time
-		s.LastPaymentAt = &t
 	}
 	return &s, nil
 }
 
 // GetCustomerBalanceBucketCounts devuelve conteos por bucket para las órdenes abiertas del cliente (para tabs).
 func (r *ReportPostgresRepository) GetCustomerBalanceBucketCounts(ctx context.Context, tenantID, customerID string) (*port.BucketCounts, error) {
-	query := `
+	rc := postgres.RLSContext{TenantID: tenantID}
+
+	var c port.BucketCounts
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		query := `
 		WITH open AS (
 		    SELECT so.id,
 		           DATE_PART('day', NOW() - COALESCE(so.confirmed_at, so.created_at)) AS days
@@ -271,13 +306,13 @@ func (r *ReportPostgresRepository) GetCustomerBalanceBucketCounts(ctx context.Co
 		    COUNT(*) FILTER (WHERE days > 90) AS c_90_plus
 		FROM open
 	`
-	var c port.BucketCounts
-	err := r.db.QueryRowContext(ctx, query, tenantID, customerID).Scan(
-		&c.Bucket0_30,
-		&c.Bucket31_60,
-		&c.Bucket61_90,
-		&c.Bucket90Plus,
-	)
+		return tx.QueryRowContext(ctx, query, tenantID, customerID).Scan(
+			&c.Bucket0_30,
+			&c.Bucket31_60,
+			&c.Bucket61_90,
+			&c.Bucket90Plus,
+		)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("get customer balance bucket counts: %w", err)
 	}
@@ -291,21 +326,35 @@ func (r *ReportPostgresRepository) GetCustomerOpenOrders(
 	limit, offset int,
 	agingBucket, sort string,
 ) ([]port.OpenOrderRow, error) {
-	agingClause := agingConditionSQL(agingBucket)
-	query := openOrdersSelect + ` AND so.customer_id = $2` + agingClause +
-		` ORDER BY ` + orderBySQL(sort) +
-		fmt.Sprintf(" LIMIT $3 OFFSET $4")
-	rows, err := r.db.QueryContext(ctx, query, tenantID, customerID, limit, offset)
+	rc := postgres.RLSContext{TenantID: tenantID}
+
+	var result []port.OpenOrderRow
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		agingClause := agingConditionSQL(agingBucket)
+		query := openOrdersSelect + ` AND so.customer_id = $2` + agingClause +
+			` ORDER BY ` + orderBySQL(sort) +
+			fmt.Sprintf(" LIMIT $3 OFFSET $4")
+		rows, err := tx.QueryContext(ctx, query, tenantID, customerID, limit, offset)
+		if err != nil {
+			return fmt.Errorf("get customer open orders: %w", err)
+		}
+		defer rows.Close()
+		result, err = scanOpenOrderRows(rows)
+		return err
+	})
 	if err != nil {
-		return nil, fmt.Errorf("get customer open orders: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
-	return scanOpenOrderRows(rows)
+	return result, nil
 }
 
 // GetCustomerAging devuelve aging de un solo cliente (un row o vacío).
 func (r *ReportPostgresRepository) GetCustomerAging(ctx context.Context, tenantID, customerID string) (*port.AgingRow, error) {
-	query := `
+	rc := postgres.RLSContext{TenantID: tenantID}
+
+	var row port.AgingRow
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		query := `
 		SELECT
 		    so.customer_id,
 		    SUM(CASE WHEN NOW() - COALESCE(so.confirmed_at, so.created_at) <= INTERVAL '30 days' THEN so.total_amount - COALESCE(sp.total_paid, 0) ELSE 0 END) AS bucket_0_30,
@@ -318,29 +367,37 @@ func (r *ReportPostgresRepository) GetCustomerAging(ctx context.Context, tenantI
 		GROUP BY so.customer_id
 		HAVING SUM(so.total_amount - COALESCE(sp.total_paid, 0)) > 0
 	`
-	var row port.AgingRow
-	err := r.db.QueryRowContext(ctx, query, tenantID, customerID).Scan(
-		&row.CustomerID,
-		&row.Bucket0_30,
-		&row.Bucket31_60,
-		&row.Bucket61_90,
-		&row.Bucket90Plus,
-	)
-	if err == sql.ErrNoRows {
-		// Cliente sin deuda: devolver row en ceros
-		row.CustomerID = customerID
-		return &row, nil
-	}
+		err := tx.QueryRowContext(ctx, query, tenantID, customerID).Scan(
+			&row.CustomerID,
+			&row.Bucket0_30,
+			&row.Bucket31_60,
+			&row.Bucket61_90,
+			&row.Bucket90Plus,
+		)
+		if err == sql.ErrNoRows {
+			// Cliente sin deuda: devolver row en ceros
+			row.CustomerID = customerID
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		row.Total = row.Bucket0_30 + row.Bucket31_60 + row.Bucket61_90 + row.Bucket90Plus
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("get customer aging: %w", err)
 	}
-	row.Total = row.Bucket0_30 + row.Bucket31_60 + row.Bucket61_90 + row.Bucket90Plus
 	return &row, nil
 }
 
 // GetAgingReport devuelve aging por cliente (buckets 0-30, 31-60, 61-90, 90+ días).
 func (r *ReportPostgresRepository) GetAgingReport(ctx context.Context, tenantID string) ([]port.AgingRow, error) {
-	query := `
+	rc := postgres.RLSContext{TenantID: tenantID}
+
+	var result []port.AgingRow
+	err := postgres.WithRLSInTransaction(ctx, r.db, rc, func(ctx context.Context, tx *sql.Tx) error {
+		query := `
 		SELECT
 		    so.customer_id,
 
@@ -392,30 +449,34 @@ func (r *ReportPostgresRepository) GetAgingReport(ctx context.Context, tenantID 
 		HAVING SUM(so.total_amount - COALESCE(sp.total_paid, 0)) > 0
 		ORDER BY bucket_90_plus DESC
 	`
-	rows, err := r.db.QueryContext(ctx, query, tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("get aging report: %w", err)
-	}
-	defer rows.Close()
-
-	var result []port.AgingRow
-	for rows.Next() {
-		var row port.AgingRow
-		err := rows.Scan(
-			&row.CustomerID,
-			&row.Bucket0_30,
-			&row.Bucket31_60,
-			&row.Bucket61_90,
-			&row.Bucket90Plus,
-		)
+		rows, err := tx.QueryContext(ctx, query, tenantID)
 		if err != nil {
-			return nil, fmt.Errorf("scan aging row: %w", err)
+			return fmt.Errorf("get aging report: %w", err)
 		}
-		row.Total = row.Bucket0_30 + row.Bucket31_60 + row.Bucket61_90 + row.Bucket90Plus
-		result = append(result, row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating aging report: %w", err)
+		defer rows.Close()
+
+		for rows.Next() {
+			var row port.AgingRow
+			err := rows.Scan(
+				&row.CustomerID,
+				&row.Bucket0_30,
+				&row.Bucket31_60,
+				&row.Bucket61_90,
+				&row.Bucket90Plus,
+			)
+			if err != nil {
+				return fmt.Errorf("scan aging row: %w", err)
+			}
+			row.Total = row.Bucket0_30 + row.Bucket31_60 + row.Bucket61_90 + row.Bucket90Plus
+			result = append(result, row)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterating aging report: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return result, nil
 }

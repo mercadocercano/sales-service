@@ -62,7 +62,7 @@ func (c *CashSessionController) Open(ctx *gin.Context) {
 		httpresp.JSON(ctx, http.StatusServiceUnavailable, "cash sessions not available (database not configured)")
 		return
 	}
-	tenantID, ok := tenantFromHeader(ctx)
+	tenantID, ok := tenantFromContext(ctx)
 	if !ok {
 		return
 	}
@@ -88,7 +88,7 @@ func (c *CashSessionController) GetCurrent(ctx *gin.Context) {
 		httpresp.JSON(ctx, http.StatusServiceUnavailable, "cash sessions not available (database not configured)")
 		return
 	}
-	tenantID, ok := tenantFromHeader(ctx)
+	tenantID, ok := tenantFromContext(ctx)
 	if !ok {
 		return
 	}
@@ -106,7 +106,7 @@ func (c *CashSessionController) GetByID(ctx *gin.Context) {
 		httpresp.JSON(ctx, http.StatusServiceUnavailable, "cash sessions not available (database not configured)")
 		return
 	}
-	tenantID, ok := tenantFromHeader(ctx)
+	tenantID, ok := tenantFromContext(ctx)
 	if !ok {
 		return
 	}
@@ -127,7 +127,7 @@ func (c *CashSessionController) RegisterMovement(ctx *gin.Context) {
 		httpresp.JSON(ctx, http.StatusServiceUnavailable, "cash sessions not available (database not configured)")
 		return
 	}
-	tenantID, ok := tenantFromHeader(ctx)
+	tenantID, ok := tenantFromContext(ctx)
 	if !ok {
 		return
 	}
@@ -157,7 +157,7 @@ func (c *CashSessionController) Close(ctx *gin.Context) {
 		httpresp.JSON(ctx, http.StatusServiceUnavailable, "cash sessions not available (database not configured)")
 		return
 	}
-	tenantID, ok := tenantFromHeader(ctx)
+	tenantID, ok := tenantFromContext(ctx)
 	if !ok {
 		return
 	}
@@ -187,7 +187,7 @@ func (c *CashSessionController) ApproveReview(ctx *gin.Context) {
 		httpresp.JSON(ctx, http.StatusServiceUnavailable, "cash sessions not available (database not configured)")
 		return
 	}
-	tenantID, ok := tenantFromHeader(ctx)
+	tenantID, ok := tenantFromContext(ctx)
 	if !ok {
 		return
 	}
@@ -209,15 +209,18 @@ func (c *CashSessionController) ApproveReview(ctx *gin.Context) {
 
 // --- helpers ---
 
-func tenantFromHeader(ctx *gin.Context) (uuid.UUID, bool) {
-	raw := ctx.GetHeader("X-Tenant-ID")
+// tenantFromContext lee tenant_id del claim JWT ya validado por tenantmw.TenantValidation
+// (c.Set("tenant_id", jwtTenantID)), nunca del header X-Tenant-ID crudo — el middleware ya lo
+// cruzó contra el claim y aborta con 403 antes de llegar acá si no coinciden (PLAT-E25 T12).
+func tenantFromContext(ctx *gin.Context) (uuid.UUID, bool) {
+	raw := ctx.GetString("tenant_id")
 	if raw == "" {
-		httpresp.JSON(ctx, http.StatusBadRequest, "X-Tenant-ID header is required")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "tenant_id missing from request context")
 		return uuid.Nil, false
 	}
 	id, err := uuid.Parse(raw)
 	if err != nil {
-		httpresp.JSON(ctx, http.StatusBadRequest, "invalid X-Tenant-ID format")
+		httpresp.JSON(ctx, http.StatusUnauthorized, "invalid tenant_id in request context")
 		return uuid.Nil, false
 	}
 	return id, true
