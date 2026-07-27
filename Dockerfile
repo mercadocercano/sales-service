@@ -6,10 +6,12 @@
 # ==============================================
 # Stage 1: Dependencies and cache optimization
 # ==============================================
-FROM golang:1.25-alpine AS deps
+FROM golang:1.25-bookworm AS deps
 WORKDIR /app
 
-RUN apk add --no-cache git ca-certificates tzdata
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
 # Configure private Go modules. El token llega como BuildKit secret y NUNCA
 # queda en una capa: se usa solo durante este RUN y se borra el gitconfig al final.
@@ -75,9 +77,10 @@ CMD sh -c 'air -c .air.toml'
 # ==============================================
 # Stage 4: Migrate stage (Alpine + psql para Job K8s)
 # ==============================================
-FROM alpine:3.18 AS migrate
+FROM debian:bookworm-slim AS migrate
 
-RUN apk add --no-cache postgresql-client
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY --from=builder /app/migrations ./migrations

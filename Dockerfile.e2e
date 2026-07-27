@@ -1,5 +1,5 @@
 # Dockerfile para build con context desde raíz del monorepo (eventbus)
-FROM golang:1.25-alpine AS deps
+FROM golang:1.25-bookworm AS deps
 WORKDIR /app
 
 # Copiar eventbus primero (replace en go.mod), luego go.mod
@@ -12,9 +12,10 @@ COPY services/sales-service/ ./
 COPY libs/eventbus /libs/eventbus
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-w -s' -o sales-service .
 
-FROM golang:1.25-alpine AS development
-RUN addgroup -g 1001 -S appgroup && adduser -S -D -h /app -s /bin/sh -G appgroup -u 1001 appuser
-RUN apk add --no-cache ca-certificates tzdata curl postgresql-client git
+FROM golang:1.25-bookworm AS development
+RUN groupadd --gid 1001 appgroup && useradd --uid 1001 --gid appgroup --create-home --home-dir /app --shell /bin/sh appuser
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata curl postgresql-client git \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 COPY services/sales-service/go.mod services/sales-service/go.sum ./
