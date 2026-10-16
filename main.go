@@ -75,22 +75,7 @@ func main() {
 	// Agregar middlewares básicos necesarios
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
-	salesNamespace := os.Getenv("SERVICE_NAMESPACE")
-	if salesNamespace == "" {
-		salesNamespace = "mc"
-	}
-	router.Use(tenantmw.TenantValidation(tenantmw.TenantValidationConfig{
-		JWTSecret: os.Getenv("JWT_SECRET"),
-		// sales maneja dinero (caja/POS): se valida namespace y se CIERRA el bypass de
-		// tenant (sin tenant_id ⇒ 403). Prerequisito de seguridad de la caja (ADR-003).
-		Namespace:           salesNamespace,
-		RejectMissingTenant: true,
-		ExcludedRoutes: []string{
-			"/health",
-			"/api/v1/health",
-			"/metrics",
-		},
-	}))
+	router.Use(tenantmw.TenantValidation(tenantValidationConfig()))
 
 	// Configurar Prometheus metrics si está habilitado
 	prometheusEnabled := os.Getenv("PROMETHEUS_ENABLED")
@@ -350,4 +335,25 @@ func setupSalesModule(router *gin.RouterGroup, db *sql.DB, paymentMethodDB *sql.
 	metricsCtrl.RegisterRoutes(router)
 
 	log.Println("Módulo Sales configurado exitosamente")
+}
+
+// tenantValidationConfig es la config REAL del gate de tenant de sales (extraída de main para que
+// el test representativo de ACC-E03 T5b ejercite esta misma config, no una copia).
+func tenantValidationConfig() tenantmw.TenantValidationConfig {
+	salesNamespace := os.Getenv("SERVICE_NAMESPACE")
+	if salesNamespace == "" {
+		salesNamespace = "mc"
+	}
+	return tenantmw.TenantValidationConfig{
+		JWTSecret: os.Getenv("JWT_SECRET"),
+		// sales maneja dinero (caja/POS): se valida namespace y se CIERRA el bypass de
+		// tenant (sin tenant_id ⇒ 403). Prerequisito de seguridad de la caja (ADR-003).
+		Namespace:           salesNamespace,
+		RejectMissingTenant: true,
+		ExcludedRoutes: []string{
+			"/health",
+			"/api/v1/health",
+			"/metrics",
+		},
+	}
 }
