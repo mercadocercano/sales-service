@@ -92,6 +92,8 @@ func fleetDualAssert(t *testing.T, r *gin.Engine, path string, key, other *rsa.P
 		"RS256 firmado con OTRA clave": fleetDualSign(t, jwt.SigningMethodRS256, other, kid),
 		"alg:none":                     none,
 		"HS256 con la pública como secreto (RS/HS)": fleetDualSign(t, jwt.SigningMethodHS256, []byte(pubPEM), kid),
+		// ACC-E03 T6: el secreto compartido de la flota ya no verifica nada.
+		"HS256 con el JWT_SECRET de la flota (T6)": fleetDualSign(t, jwt.SigningMethodHS256, []byte(fleetDualSecret), kid),
 	} {
 		if w := fleetDualDo(r, path, tok); w.Code != http.StatusUnauthorized {
 			t.Errorf("%s: code=%d, se espera 401", name, w.Code)
